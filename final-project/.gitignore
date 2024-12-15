@@ -1,0 +1,11 @@
+# Miscellaneous
+assets/
+
+# Model files
+model/
+
+# Output files
+main
+
+# Object files
+*.o 
