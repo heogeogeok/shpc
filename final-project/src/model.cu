@@ -1,62 +1,12 @@
-#include <mpi.h>ㅋ
+#include <mpi.h>
 
 #include <cstdio>
 
 #include "layer.h"
 #include "model.h"
 
-static int mpi_size, mpi_rank;
+static int mpi_rank, mpi_size;
 
-/** SECTION: Hyperparams **/
-#define MAX_MPI_SIZE 4
-
-#define PUSH_BATCH_SIZE 64
-#define POP_BATCH_SIZE 64
-#define COMPUTE_BATCH_SIZE 4
-
-#define C1D_K3_BM 16
-#define C1D_K3_BN 8
-#define C1D_K3_BK 8
-
-#define C1D_K7_BM 8
-#define C1D_K7_BN 32
-#define C1D_K7_BK 4
-
-#define LIN_NAIVE_BM 16
-#define LIN_NAIVE_BN 4
-
-#define LIN_REG_BM 4
-#define LIN_REG_BN 16
-#define LIN_REG_BK 32
-
-#define LNORM_CHAN 256  // NEVER CHANGE!
-#define LNORM_102_INPT 64
-#define LNORM_1008_INPT 512
-
-#define LNMP_OUTPTH 2
-
-/**  SECTION: GPU manipulation **/
-#define NGPU 4
-
-/** SECTION: DEBUGGING **/
-#define DEBUG 0
-#if DEBUG == 1
-double dbg_start_time, dbg_ce_init, dbg_ce_final;
-#define DEBUG_PRINT(...) do { \
-  printf("(%s|rank=%d) ", processor_name, mpi_rank); \
-  printf(__VA_ARGS__); \
-} while (0)
-#else
-#define DEBUG_PRINT(...)
-#endif
-
-int checksum(float *buf, int N) {
-  int sum = 0;
-  for (int i = 0; i < N; ++i)
-    sum += (int) buf[i];
-
-  return sum;
-}
 
 /* [Model Parameters]
  * _w: Weight parameter
@@ -127,14 +77,22 @@ void alloc_and_set_parameters(float *param, size_t param_size) {
 
 void free_parameters() {
   delete emb_w;
-  delete conv0_w; delete conv0_b;
-  delete conv1_w; delete conv1_b;
-  delete conv2_w; delete conv2_b;
-  delete conv3_w; delete conv3_b;
-  delete linear0_w; delete linear0_b;
-  delete linear1_w; delete linear1_b;
-  delete linear2_w; delete linear2_b;
-  delete linear3_w; delete linear3_b;
+  delete conv0_w;
+  delete conv0_b;
+  delete conv1_w;
+  delete conv1_b;
+  delete conv2_w;
+  delete conv2_b;
+  delete conv3_w;
+  delete conv3_b;
+  delete linear0_w;
+  delete linear0_b;
+  delete linear1_w;
+  delete linear1_b;
+  delete linear2_w;
+  delete linear2_b;
+  delete linear3_w;
+  delete linear3_b;
 }
 
 /* [Model Activations] 
@@ -170,11 +128,16 @@ void alloc_activations() {
 void free_activations() {
   delete emb_a;
   delete permute_a;
-  delete conv0_a; delete pool0_a;
-  delete conv1_a; delete pool1_a;
-  delete conv2_a; delete pool2_a;
-  delete conv3_a; delete pool3_a;
-  delete concat_a; delete linear0_a;
+  delete conv0_a;
+  delete pool0_a;
+  delete conv1_a;
+  delete pool1_a;
+  delete conv2_a;
+  delete pool2_a;
+  delete conv3_a;
+  delete pool3_a;
+  delete concat_a;
+  delete linear0_a;
   delete linear1_a;
   delete linear2_a;
   delete linear3_a;
@@ -182,14 +145,30 @@ void free_activations() {
 
 /* [Model Computation: Sentiment Analysis Task] */
 void predict_sentiment(int *inputs, float *outputs, size_t n_samples) {
-  MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
+
+  size_t local_samples = n_samples / mpi_size;
+  size_t remainder = n_samples % mpi_size;
+
+  int *local_inputs = (int *) malloc(local_samples * SEQ_LEN * sizeof(int));
+  float *local_outputs = (float *) malloc(local_samples * 2 * sizeof(float));
 
   if (mpi_rank == 0) {
-    /* Predict sentiment for each sentence */
-    for (size_t n = 0; n < n_samples; n++) {
+    for (int i = 0; i < mpi_size; i++){
+      size_t offset = i * local_samples * SEQ_LEN;
+      if (i == mpi_size - 1)
+        local_samples += remainder;
+      MPI_Send(inputs + offset, local_samples * SEQ_LEN, MPI_INT, i, 0, MPI_COMM_WORLD);
+    }
+   
+  }
+  
+  MPI_Recv(local_inputs, local_samples * SEQ_LEN, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+  for (size_t n = 0; n < local_samples; n++) {
       /* Load a sentence from the inputs */
-      int *single_input = inputs + n * SEQ_LEN;
+      int *single_input = local_inputs + n * SEQ_LEN;
 
       /* in [SEQ_LEN] -> out [SEQ_LEN, 4096] */
       Embedding(single_input, emb_w, emb_a);
@@ -228,13 +207,13 @@ void predict_sentiment(int *inputs, float *outputs, size_t n_samples) {
       Concat(pool0_a, pool1_a, pool2_a, pool3_a, concat_a);
 
       /* in [1024 * 4] -> out [2048] */
-      Linear_CUDA(concat_a, linear0_w, linear0_b, linear0_a);
+      Linear_ReLU(concat_a, linear0_w, linear0_b, linear0_a);
 
       /* in [2048] -> out [1024] */
-      Linear_CUDA(linear0_a, linear1_w, linear1_b, linear1_a);
+      Linear_ReLU(linear0_a, linear1_w, linear1_b, linear1_a);
 
       /* in [1024] -> out [512] */
-      Linear_CUDA(linear1_a, linear2_w, linear2_b, linear2_a);
+      Linear_ReLU(linear1_a, linear2_w, linear2_b, linear2_a);
 
       /* in [512] -> out [2] */
       Linear(linear2_a, linear3_w, linear3_b, linear3_a);
@@ -245,7 +224,11 @@ void predict_sentiment(int *inputs, float *outputs, size_t n_samples) {
       */
 
       /* Copy the computation result to the outputs */
-      memcpy(outputs + n * 2, linear3_a->buf, 2 * sizeof(float));
-    }
+      memcpy(local_outputs + n * 2, linear3_a->buf, 2 * sizeof(float));
   }
+
+  MPI_Gather(local_outputs, local_samples * 2, MPI_FLOAT, outputs, local_samples * 2, MPI_FLOAT, 0, MPI_COMM_WORLD);
+  
+  free(local_inputs);
+  free(local_outputs);
 }

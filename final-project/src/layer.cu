@@ -2,38 +2,8 @@
 
 #define div(x, y) (((x) + (y) -1) / (y))
 
-#define NPARAM (OFFSET21 + 4)
-
 /** SECTION: GPU manipulation **/
 #define NGPU    4
-
-/** SECTION: Hyperparams **/
-#define MAX_MPI_SIZE 4
-
-#define PUSH_BATCH_SIZE 64
-#define POP_BATCH_SIZE 64
-#define COMPUTE_BATCH_SIZE 4
-
-#define C1D_K3_BM 16
-#define C1D_K3_BN 8
-#define C1D_K3_BK 8
-
-#define C1D_K7_BM 8
-#define C1D_K7_BN 32
-#define C1D_K7_BK 4
-
-#define LIN_NAIVE_BM 16
-#define LIN_NAIVE_BN 4
-
-#define LIN_REG_BM 4
-#define LIN_REG_BN 16
-#define LIN_REG_BK 32
-
-#define LNORM_CHAN 256  // NEVER CHANGE!
-#define LNORM_102_INPT 64
-#define LNORM_1008_INPT 512
-
-#define LNMP_OUTPTH 2
 
 /** SECTION: Kernels **/
 /* ReLU CUDA kernel */
@@ -81,7 +51,7 @@ __global__ void klinear(float *in, float *w, float *b, float *out, int N, int M,
         val = fmaxf(val, 0.0f);
     }
     
-    // 결과 저장
+
     out[i] = val;
     }
 }
@@ -97,6 +67,7 @@ void Embedding(int *in, Tensor* w, Tensor *out) {
   size_t s = out->shape[0];
   size_t H = out->shape[1];
 
+  #pragma omp parallel for
   for (size_t i = 0; i < s; i++) {
     for (size_t j = 0; j < H; j++) {
       out->buf[i * H + j] = w->buf[in[i] * H + j];
@@ -112,6 +83,7 @@ void Permute(Tensor *in, Tensor *out) {
   size_t s = in->shape[0];
   size_t H = in->shape[1];
 
+  // #pragma omp parallel for
   for (size_t i = 0; i < s; i++) {
     for (size_t j = 0; j < H; j++) {
       out->buf[j * s + i] = in->buf[i * H + j];
@@ -190,6 +162,7 @@ void GetMax(Tensor *in, Tensor *out) {
   size_t C = in->shape[0];
   size_t s = in->shape[1];
 
+  #pragma omp parallel for
   for (size_t i = 0; i < C; i++) {
     out->buf[i] = in->buf[i * s];
     for (size_t j = 1; j < s; j++) {
@@ -253,9 +226,9 @@ void Linear(Tensor *in, Tensor *w, Tensor *b, Tensor *out) {
     CHECK_CUDA(cudaMemcpy(d_b, b->buf, size_b, cudaMemcpyHostToDevice));
 
     int M = w->shape[0];
-    int threadsPerBlock = 256;
-    int blocksPerGrid = (M + threadsPerBlock - 1) / threadsPerBlock;
-    klinear<<<blocksPerGrid, threadsPerBlock>>>(d_in, d_w, d_b, d_out, in->shape[0], M, false);
+    int blockDim = 256;
+    int gridDim = (M + blockDim - 1) / blockDim;
+    klinear<<<gridDim, blockDim>>>(d_in, d_w, d_b, d_out, in->shape[0], M, false);
 
     CHECK_CUDA(cudaMemcpy(out->buf, d_out, size_out, cudaMemcpyDeviceToHost));
 
@@ -265,7 +238,7 @@ void Linear(Tensor *in, Tensor *w, Tensor *b, Tensor *out) {
     CHECK_CUDA(cudaFree(d_out));
 }
 
-void Linear_CUDA(Tensor *in, Tensor *w, Tensor *b, Tensor *out){
+void Linear_ReLU(Tensor *in, Tensor *w, Tensor *b, Tensor *out){
     float *d_in, *d_w, *d_b, *d_out;
     size_t size_in = in->num_elem() * sizeof(float);
     size_t size_w = w->num_elem() * sizeof(float);
@@ -282,9 +255,9 @@ void Linear_CUDA(Tensor *in, Tensor *w, Tensor *b, Tensor *out){
     CHECK_CUDA(cudaMemcpy(d_b, b->buf, size_b, cudaMemcpyHostToDevice));
 
     int M = w->shape[0];
-    int threadsPerBlock = 256;
-    int blocksPerGrid = (M + threadsPerBlock - 1) / threadsPerBlock;
-    klinear<<<blocksPerGrid, threadsPerBlock>>>(d_in, d_w, d_b, d_out, in->shape[0], M, true);
+    int blockDim = 256;
+    int gridDim = (M + blockDim - 1) / blockDim;
+    klinear<<<gridDim, blockDim>>>(d_in, d_w, d_b, d_out, in->shape[0], M, true);
 
     CHECK_CUDA(cudaMemcpy(out->buf, d_out, size_out, cudaMemcpyDeviceToHost));
 
