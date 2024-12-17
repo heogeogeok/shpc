@@ -28,3 +28,5 @@
 -   Baseline: 0.12 input(s)/sec
 -   Synchronous offload: 8.19 input(s)/sec
 -   GPU computation: 95 input(s)/sec
+-   Multi-GPU: 260 input(s)/sec
+-   Stream: 272 input(s)/sec

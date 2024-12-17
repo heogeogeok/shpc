@@ -13,9 +13,6 @@ double dbg_start_time, dbg_ce_init, dbg_ce_final;
 #define DEBUG_PRINT(...)
 #endif
 
-/** SECTION: GPU manipulation **/
-#define NGPU    4
-
 /** SECTION: Kernels **/
 /* Embedding CUDA kernel */
 __global__ void kembedding(const int *in, const float *w, float *out, size_t s, size_t H) {
@@ -156,13 +153,13 @@ void Permute(float *in, float *out, size_t s, size_t H) {
  * 'os' is the output sequence length
  * 'K' is the kernel (or filter) size
  */
-void Conv1D(float *in, float *w, float *b, float *out, size_t s, size_t C, size_t OC, size_t K){
+void Conv1D(float *in, float *w, float *b, float *out, size_t s, size_t C, size_t OC, size_t K, cudaStream_t stream){
   size_t os = s - K + 1;
 
   dim3 blockDim(16, 16);
-  dim3 gridDim((OC + 16) / 16, (os + 16) / 16);
+  dim3 gridDim((OC + 15) / 16, (os + 15) / 16);
 
-  kconv1d<<<gridDim, blockDim>>>(in, w, b, out, C, K, s, OC, os);
+  kconv1d<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, C, K, s, OC, os);
 }
 
 
@@ -176,11 +173,11 @@ void Conv1D(float *in, float *w, float *b, float *out, size_t s, size_t C, size_
  * 'C' is the channel size
  * 's' is the sequence length
  */
-void GetMax(float *in, float *out, size_t C, size_t s){
+void GetMax(float *in, float *out, size_t C, size_t s, cudaStream_t stream){
   dim3 blockDim(256);  
   dim3 gridDim((C + blockDim.x - 1) / blockDim.x);
 
-  kgetmax<<<gridDim, blockDim>>>(in, out, s, C);
+  kgetmax<<<gridDim, blockDim, 0, stream>>>(in, out, s, C);
 
 }
 
@@ -193,11 +190,11 @@ void GetMax(float *in, float *out, size_t C, size_t s){
  * 'N1', 'N2', 'N3', and 'N4' are the num of elems in the floats.
  */
 void Concat(float *in1, float *in2, float *in3, float *in4, 
-            float *out, size_t N1, size_t N2, size_t N3, size_t N4) {
+            float *out, size_t N1, size_t N2, size_t N3, size_t N4, cudaStream_t stream) {
   dim3 blockDim(256);
   dim3 gridDim((N1 + N2 + N3 + N4 + blockDim.x - 1) / blockDim.x);
 
-  kconcat<<<gridDim, blockDim>>>(in1, in2, in3, in4, out, N1, N2, N3, N4);
+  kconcat<<<gridDim, blockDim, 0, stream>>>(in1, in2, in3, in4, out, N1, N2, N3, N4);
 }
 
 /* Linear 
@@ -208,16 +205,16 @@ void Concat(float *in1, float *in2, float *in3, float *in4,
  * 'N' is the input feature size
  * 'M' is the output feature size
  */
-void Linear_ReLU(float *in, float *w, float *b, float *out, int N, int M){
+void Linear_ReLU(float *in, float *w, float *b, float *out, int N, int M, cudaStream_t stream) {
     int blockDim = 256;
     int gridDim = (M + blockDim - 1) / blockDim;
-    klinear<<<gridDim, blockDim>>>(in, w, b, out, N, M, true);
+    klinear<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, N, M, true);
 }
 
 // Final result
-void Linear(float *in, float *w, float *b, float *out, int N, int M) {
+void Linear(float *in, float *w, float *b, float *out, int N, int M, cudaStream_t stream) {
     int blockDim = 256;
     int gridDim = (M + blockDim - 1) / blockDim;
 
-    klinear<<<gridDim, blockDim>>>(in, w, b, out, N, M, false);
+    klinear<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, N, M, false);
 }

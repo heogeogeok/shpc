@@ -8,6 +8,8 @@
 #define N_FILTERS 1024
 #define N_CLASSES 2
 #define SEQ_LEN 16
+#define NGPU 4
+#define MAX_SAMPLES 1024 * 1024
 
 
 void alloc_and_set_parameters(float *param, size_t param_size);
