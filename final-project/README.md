@@ -5,7 +5,7 @@
 -   [x] Calculate each operator with CUDA: `Embedding`, `Conv1D`, `Permute`, `ReLU`, `GetMax`, `Linear`, etc.
 
     -   [x] Create CUDA version of each operators
-        -   `Conv1D`: Rectangular blocking
+        -   `Conv1D`: Naive
         -   `Permute`: Naive
         -   `ReLU`: All merged into the other operators
         -   `GetMax`: Naive
@@ -27,3 +27,4 @@
 
 -   Baseline: 0.12 input(s)/sec
 -   Synchronous offload: 8.19 input(s)/sec
+-   GPU computation: 95 input(s)/sec
