@@ -17,7 +17,7 @@
     -   [x] `Conv1D_ReLU`: integrated into `Conv1D`.
     -   [x] `Linear_ReLU`: integrated into `Linear`.
 
--   [ ] Caculate each opeartor with multi-gpu
+-   [x] Caculate each opeartor with multi-gpu
 -   [ ] Calculate multiple batches at once
 -   [ ] Calculate multiple batches at once
 -   [ ] Synchronously offload input to other nodes using MPI
