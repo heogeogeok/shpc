@@ -1,12 +1,24 @@
 #include <mpi.h>
+#include <omp.h>
 
 #include <cstdio>
 
 #include "layer.h"
 #include "model.h"
 
-static int mpi_rank, mpi_size;
+int mpi_rank, mpi_size;
 
+/** SECTION: DEBUGGING **/
+#define DEBUG 0
+#if DEBUG == 1
+double dbg_start_time, dbg_ce_init, dbg_ce_final;
+#define DEBUG_PRINT(...) do { \
+  printf("(%s|rank=%d) ", mpi_rank); \
+  printf(__VA_ARGS__); \
+} while (0)
+#else
+#define DEBUG_PRINT(...)
+#endif
 
 /* [Model Parameters]
  * _w: Weight parameter
@@ -21,6 +33,23 @@ Parameter *linear0_w, *linear0_b;
 Parameter *linear1_w, *linear1_b;
 Parameter *linear2_w, *linear2_b;
 Parameter *linear3_w, *linear3_b;
+
+static float *emb_w_d;
+static float *conv0_w_d, *conv0_b_d;
+static float *conv1_w_d, *conv1_b_d;
+static float *conv2_w_d, *conv2_b_d;
+static float *conv3_w_d, *conv3_b_d;
+static float *linear0_w_d, *linear0_b_d;
+static float *linear1_w_d, *linear1_b_d;
+static float *linear2_w_d, *linear2_b_d;
+static float *linear3_w_d, *linear3_b_d;
+
+void check_gpu_memory() {
+    size_t free_mem, total_mem;
+    CHECK_CUDA(cudaMemGetInfo(&free_mem, &total_mem));
+    printf("GPU Memory: Free = %.2f MB, Total = %.2f MB\n", 
+           free_mem / 1024.0 / 1024.0, total_mem / 1024.0 / 1024.0);
+}
 
 void alloc_and_set_parameters(float *param, size_t param_size) {
   size_t pos = 0;
@@ -73,6 +102,51 @@ void alloc_and_set_parameters(float *param, size_t param_size) {
             pos, param_size);
     exit(EXIT_FAILURE);
   }
+
+  CHECK_CUDA(cudaMalloc(&emb_w_d, 21635 * 4096 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&conv0_w_d, 1024 * 4096 * 3 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&conv0_b_d, 1024 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&conv1_w_d, 1024 * 4096 * 5 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&conv1_b_d, 1024 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&conv2_w_d, 1024 * 4096 * 7 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&conv2_b_d, 1024 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&conv3_w_d, 1024 * 4096 * 9 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&conv3_b_d, 1024 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&linear0_w_d, 2048 * 4096 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&linear0_b_d, 2048 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&linear1_w_d, 1024 * 2048 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&linear1_b_d, 1024 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&linear2_w_d, 512 * 1024 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&linear2_b_d, 512 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&linear3_w_d, 2 * 512 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&linear3_b_d, 2 * sizeof(float)));
+
+
+  CHECK_CUDA(cudaMemcpyAsync(emb_w_d, emb_w->buf, 21635 * 4096 * sizeof(float), cudaMemcpyHostToDevice));
+
+  CHECK_CUDA(cudaMemcpyAsync(conv0_w_d, conv0_w->buf, 1024 * 4096 * 3 * sizeof(float), cudaMemcpyHostToDevice));
+  CHECK_CUDA(cudaMemcpyAsync(conv0_b_d, conv0_b->buf, 1024 * sizeof(float), cudaMemcpyHostToDevice));
+
+  CHECK_CUDA(cudaMemcpyAsync(conv1_w_d, conv1_w->buf, 1024 * 4096 * 5 * sizeof(float), cudaMemcpyHostToDevice));
+  CHECK_CUDA(cudaMemcpyAsync(conv1_b_d, conv1_b->buf, 1024 * sizeof(float), cudaMemcpyHostToDevice));
+
+  CHECK_CUDA(cudaMemcpyAsync(conv2_w_d, conv2_w->buf, 1024 * 4096 * 7 * sizeof(float), cudaMemcpyHostToDevice));
+  CHECK_CUDA(cudaMemcpyAsync(conv2_b_d, conv2_b->buf, 1024 * sizeof(float), cudaMemcpyHostToDevice));
+
+  CHECK_CUDA(cudaMemcpyAsync(conv3_w_d, conv3_w->buf, 1024 * 4096 * 9 * sizeof(float), cudaMemcpyHostToDevice));
+  CHECK_CUDA(cudaMemcpyAsync(conv3_b_d, conv3_b->buf, 1024 * sizeof(float), cudaMemcpyHostToDevice));
+
+  CHECK_CUDA(cudaMemcpyAsync(linear0_w_d, linear0_w->buf, 2048 * 4096 * sizeof(float), cudaMemcpyHostToDevice));
+  CHECK_CUDA(cudaMemcpyAsync(linear0_b_d, linear0_b->buf, 2048 * sizeof(float), cudaMemcpyHostToDevice));
+
+  CHECK_CUDA(cudaMemcpyAsync(linear1_w_d, linear1_w->buf, 1024 * 2048 * sizeof(float), cudaMemcpyHostToDevice));
+  CHECK_CUDA(cudaMemcpyAsync(linear1_b_d, linear1_b->buf, 1024 * sizeof(float), cudaMemcpyHostToDevice));
+
+  CHECK_CUDA(cudaMemcpyAsync(linear2_w_d, linear2_w->buf, 512 * 1024 * sizeof(float), cudaMemcpyHostToDevice));
+  CHECK_CUDA(cudaMemcpyAsync(linear2_b_d, linear2_b->buf, 512 * sizeof(float), cudaMemcpyHostToDevice));
+
+  CHECK_CUDA(cudaMemcpyAsync(linear3_w_d, linear3_w->buf, 2 * 512 * sizeof(float), cudaMemcpyHostToDevice));
+  CHECK_CUDA(cudaMemcpyAsync(linear3_b_d, linear3_b->buf, 2 * sizeof(float), cudaMemcpyHostToDevice));
 }
 
 void free_parameters() {
@@ -93,6 +167,22 @@ void free_parameters() {
   delete linear2_b;
   delete linear3_w;
   delete linear3_b;
+
+  CHECK_CUDA(cudaFree(emb_w_d));
+  CHECK_CUDA(cudaFree(conv0_w_d));
+  CHECK_CUDA(cudaFree(conv0_b_d));
+  CHECK_CUDA(cudaFree(conv1_w_d));
+  CHECK_CUDA(cudaFree(conv1_b_d));
+  CHECK_CUDA(cudaFree(conv2_w_d));
+  CHECK_CUDA(cudaFree(conv2_b_d));
+  CHECK_CUDA(cudaFree(conv3_w_d));
+  CHECK_CUDA(cudaFree(conv3_b_d));
+  CHECK_CUDA(cudaFree(linear0_w_d));
+  CHECK_CUDA(cudaFree(linear0_b_d));
+  CHECK_CUDA(cudaFree(linear1_w_d));
+  CHECK_CUDA(cudaFree(linear1_b_d));
+  CHECK_CUDA(cudaFree(linear3_w_d));
+  CHECK_CUDA(cudaFree(linear3_b_d));
 }
 
 /* [Model Activations] 
@@ -106,6 +196,18 @@ Activation *conv2_a, *relu2_a, *pool2_a;
 Activation *conv3_a, *relu3_a, *pool3_a;
 Activation *concat_a;
 Activation *linear0_a, *linear1_a, *linear2_a, *linear3_a;
+
+static float *emb_a_d;
+static float *permute_a_d;
+static float *conv0_a_d, *pool0_a_d;
+static float *conv1_a_d, *pool1_a_d;
+static float *conv2_a_d, *pool2_a_d;
+static float *conv3_a_d, *pool3_a_d;
+static float *concat_a_d;
+static float *linear0_a_d;
+static float *linear1_a_d;
+static float *linear2_a_d;
+static float *linear3_a_d;
 
 void alloc_activations() {
   emb_a = new Activation({SEQ_LEN, 4096});
@@ -123,6 +225,22 @@ void alloc_activations() {
   linear1_a = new Activation({1024});
   linear2_a = new Activation({512});
   linear3_a = new Activation({2});
+
+  CHECK_CUDA(cudaMalloc(&emb_a_d, SEQ_LEN * 4096 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&permute_a_d, 4096 * SEQ_LEN * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&conv0_a_d, 1024 * (SEQ_LEN - 2) * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&pool0_a_d, 1024 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&conv1_a_d, 1024 * (SEQ_LEN - 4) * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&pool1_a_d, 1024 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&conv2_a_d, 1024 * (SEQ_LEN - 6) * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&pool2_a_d, 1024 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&conv3_a_d, 1024 * (SEQ_LEN - 8) * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&pool3_a_d, 1024 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&concat_a_d, 4096 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&linear0_a_d, 2048 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&linear1_a_d, 1024 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&linear2_a_d, 512 * sizeof(float)));
+  CHECK_CUDA(cudaMalloc(&linear3_a_d, 2 * sizeof(float)));
 }
 
 void free_activations() {
@@ -141,94 +259,69 @@ void free_activations() {
   delete linear1_a;
   delete linear2_a;
   delete linear3_a;
+
+  CHECK_CUDA(cudaFree(emb_a_d));
+  CHECK_CUDA(cudaFree(permute_a_d));
+  CHECK_CUDA(cudaFree(conv0_a_d));
+  CHECK_CUDA(cudaFree(pool0_a_d));
+  CHECK_CUDA(cudaFree(conv1_a_d));
+  CHECK_CUDA(cudaFree(pool1_a_d));
+  CHECK_CUDA(cudaFree(conv2_a_d));
+  CHECK_CUDA(cudaFree(pool2_a_d));
+  CHECK_CUDA(cudaFree(conv3_a_d));
+  CHECK_CUDA(cudaFree(pool3_a_d));
+  CHECK_CUDA(cudaFree(concat_a_d));
+  CHECK_CUDA(cudaFree(linear0_a_d));
+  CHECK_CUDA(cudaFree(linear1_a_d));
+  CHECK_CUDA(cudaFree(linear2_a_d));
+  CHECK_CUDA(cudaFree(linear3_a_d));
 }
 
 /* [Model Computation: Sentiment Analysis Task] */
 void predict_sentiment(int *inputs, float *outputs, size_t n_samples) {
-  MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
   MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
-
-  size_t local_samples = n_samples / mpi_size;
-  size_t remainder = n_samples % mpi_size;
-
-  int *local_inputs = (int *) malloc(local_samples * SEQ_LEN * sizeof(int));
-  float *local_outputs = (float *) malloc(local_samples * 2 * sizeof(float));
+  MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
 
   if (mpi_rank == 0) {
-    for (int i = 0; i < mpi_size; i++){
-      size_t offset = i * local_samples * SEQ_LEN;
-      if (i == mpi_size - 1)
-        local_samples += remainder;
-      MPI_Send(inputs + offset, local_samples * SEQ_LEN, MPI_INT, i, 0, MPI_COMM_WORLD);
-    }
-   
-  }
-  
-  MPI_Recv(local_inputs, local_samples * SEQ_LEN, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    /* Predict sentiment for each sentence */
+    int *d_inputs;
+    size_t input_size = n_samples * SEQ_LEN * sizeof(int);
+    CHECK_CUDA(cudaMalloc(&d_inputs, input_size));
+    CHECK_CUDA(cudaMemcpy(d_inputs, inputs, input_size, cudaMemcpyHostToDevice));
 
-  for (size_t n = 0; n < local_samples; n++) {
+    for (size_t n = 0; n < n_samples; n++){
       /* Load a sentence from the inputs */
-      int *single_input = local_inputs + n * SEQ_LEN;
+      int *single_input = d_inputs + n * SEQ_LEN;
 
-      /* in [SEQ_LEN] -> out [SEQ_LEN, 4096] */
-      Embedding(single_input, emb_w, emb_a);
+      // Embedding
+      Embedding(single_input, emb_w_d, emb_a_d, SEQ_LEN, 4096);
 
-      /* in [SEQ_LEN, 4096] -> out [4096, SEQ_LEN] */
-      Permute(emb_a, permute_a);
+      // Permute
+      Permute(emb_a_d, permute_a_d, SEQ_LEN, 4096);
 
-      /* in [4096, SEQ_LEN] -> out [1024, SEQ_LEN - 2] */
-      Conv1D(permute_a, conv0_w, conv0_b, conv0_a);
+      // Conv1D and GetMax
+      Conv1D(permute_a_d, conv0_w_d, conv0_b_d, conv0_a_d, SEQ_LEN, 4096, 1024, 3);
+      GetMax(conv0_a_d, pool0_a_d, 1024, SEQ_LEN - 2);
+      Conv1D(permute_a_d, conv1_w_d, conv1_b_d, conv1_a_d, SEQ_LEN, 4096, 1024, 5);
+      GetMax(conv1_a_d, pool1_a_d, 1024, SEQ_LEN - 4);
+      Conv1D(permute_a_d, conv2_w_d, conv2_b_d, conv2_a_d, SEQ_LEN, 4096, 1024, 7);
+      GetMax(conv2_a_d, pool2_a_d, 1024, SEQ_LEN - 6);
+      Conv1D(permute_a_d, conv3_w_d, conv3_b_d, conv3_a_d, SEQ_LEN, 4096, 1024, 9);
+      GetMax(conv3_a_d, pool3_a_d, 1024, SEQ_LEN - 8);
 
-      /* in [1024, SEQ_LEN - 2] -> out [1024] */
-      GetMax(conv0_a, pool0_a);
+      // Concat
+      Concat(pool0_a_d, pool1_a_d, pool2_a_d, pool3_a_d, concat_a_d, 1024, 1024, 1024, 1024);
 
-      /* in [4096, SEQ_LEN] -> out [1024, SEQ_LEN - 4] */
-      Conv1D(permute_a, conv1_w, conv1_b, conv1_a);
+      // Fully Connected Layers
+      Linear_ReLU(concat_a_d, linear0_w_d, linear0_b_d, linear0_a_d, 4096, 2048);
+      Linear_ReLU(linear0_a_d, linear1_w_d, linear1_b_d, linear1_a_d, 2048, 1024);
+      Linear_ReLU(linear1_a_d, linear2_w_d, linear2_b_d, linear2_a_d, 1024, 512);
+      Linear(linear2_a_d, linear3_w_d, linear3_b_d, linear3_a_d, 512, 2);
 
-      /* in [1024, SEQ_LEN - 4] -> out [1024] */
-      GetMax(conv1_a, pool1_a);
 
-      /* in [4096, SEQ_LEN] -> out [1024, SEQ_LEN - 6] */
-      Conv1D(permute_a, conv2_w, conv2_b, conv2_a);
-
-      /* in [1024, SEQ_LEN - 6] -> out [1024] */
-      GetMax(conv2_a, pool2_a);
-
-      /* in [4096, SEQ_LEN] -> out [1024, SEQ_LEN - 8] */
-      Conv1D(permute_a, conv3_w, conv3_b, conv3_a);
-
-      /* in [1024, SEQ_LEN - 8] -> out [1024] */
-      GetMax(conv3_a, pool3_a);
-
-      /* in [1024] +
-            [1024] +
-            [1024] +
-            [1024] -> out [1024 * 4] */
-      Concat(pool0_a, pool1_a, pool2_a, pool3_a, concat_a);
-
-      /* in [1024 * 4] -> out [2048] */
-      Linear_ReLU(concat_a, linear0_w, linear0_b, linear0_a);
-
-      /* in [2048] -> out [1024] */
-      Linear_ReLU(linear0_a, linear1_w, linear1_b, linear1_a);
-
-      /* in [1024] -> out [512] */
-      Linear_ReLU(linear1_a, linear2_w, linear2_b, linear2_a);
-
-      /* in [512] -> out [2] */
-      Linear(linear2_a, linear3_w, linear3_b, linear3_a);
-
-      /* The output 'linear3_a' (shape: [2]) contains the probabilities 
-        for each sentiment class (0: negative, 1: positive). To determine 
-        the sentiment, we can simply take the argmax of these probabilities. 
-      */
-
-      /* Copy the computation result to the outputs */
-      memcpy(local_outputs + n * 2, linear3_a->buf, 2 * sizeof(float));
+      // Copy the computation result to the outputs
+      CHECK_CUDA(cudaMemcpy(outputs + n * 2, linear3_a_d, 2 * sizeof(float), cudaMemcpyDeviceToHost));
+      // memcpy(outputs + n * 2, linear3_a->buf, 2 * sizeof(float));
+    }
   }
-
-  MPI_Gather(local_outputs, local_samples * 2, MPI_FLOAT, outputs, local_samples * 2, MPI_FLOAT, 0, MPI_COMM_WORLD);
-  
-  free(local_inputs);
-  free(local_outputs);
 }

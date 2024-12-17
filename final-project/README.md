@@ -2,12 +2,9 @@
 
 ## Applied Optimization Methods
 
--   [x] Synchronously offload input to other nodes using MPI
--   [ ] Asynchronously offload input to other nodes using MPI
--   [ ] Calculate multiple batches at once
--   [ ] Calculate each operators with CUDA: `Embedding`, `Conv1D`, `Permute`, `ReLU`, `GetMax`, `Linear`, etc.
+-   [x] Calculate each operator with CUDA: `Embedding`, `Conv1D`, `Permute`, `ReLU`, `GetMax`, `Linear`, etc.
 
-    -   [ ] Create CUDA version of each operators
+    -   [x] Create CUDA version of each operators
         -   `Conv1D`: Rectangular blocking
         -   `Permute`: Naive
         -   `ReLU`: All merged into the other operators
@@ -15,10 +12,16 @@
         -   `Linear`: Naive
     -   [ ] Store most of intermediate features in global memory
 
--   [ ] Create weakly fused operators: `Conv1D_ReLU`, `Linear_ReLU`, etc.
+-   [x] Create weakly fused operators: `Conv1D_ReLU`, `Linear_ReLU`, etc.
 
-    -   [ ] `Conv1D_ReLU`: integrated into `Conv1D`.
-    -   [ ] `Linear_ReLU`: integrated into `Linear`.
+    -   [x] `Conv1D_ReLU`: integrated into `Conv1D`.
+    -   [x] `Linear_ReLU`: integrated into `Linear`.
+
+-   [ ] Caculate each opeartor with multi-gpu
+-   [ ] Calculate multiple batches at once
+-   [ ] Calculate multiple batches at once
+-   [ ] Synchronously offload input to other nodes using MPI
+-   [ ] Asynchronously offload input to other nodes using MPI
 
 ## Optimization History
 
