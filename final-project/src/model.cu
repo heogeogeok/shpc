@@ -34,22 +34,15 @@ Parameter *linear1_w, *linear1_b;
 Parameter *linear2_w, *linear2_b;
 Parameter *linear3_w, *linear3_b;
 
-static float *emb_w_d;
-static float *conv0_w_d, *conv0_b_d;
-static float *conv1_w_d, *conv1_b_d;
-static float *conv2_w_d, *conv2_b_d;
-static float *conv3_w_d, *conv3_b_d;
-static float *linear0_w_d, *linear0_b_d;
-static float *linear1_w_d, *linear1_b_d;
-static float *linear2_w_d, *linear2_b_d;
-static float *linear3_w_d, *linear3_b_d;
-
-void check_gpu_memory() {
-    size_t free_mem, total_mem;
-    CHECK_CUDA(cudaMemGetInfo(&free_mem, &total_mem));
-    printf("GPU Memory: Free = %.2f MB, Total = %.2f MB\n", 
-           free_mem / 1024.0 / 1024.0, total_mem / 1024.0 / 1024.0);
-}
+static float *emb_w_d[NGPU];
+static float *conv0_w_d[NGPU], *conv0_b_d[NGPU];
+static float *conv1_w_d[NGPU], *conv1_b_d[NGPU];
+static float *conv2_w_d[NGPU], *conv2_b_d[NGPU];
+static float *conv3_w_d[NGPU], *conv3_b_d[NGPU];
+static float *linear0_w_d[NGPU], *linear0_b_d[NGPU];
+static float *linear1_w_d[NGPU], *linear1_b_d[NGPU];
+static float *linear2_w_d[NGPU], *linear2_b_d[NGPU];
+static float *linear3_w_d[NGPU], *linear3_b_d[NGPU];
 
 void alloc_and_set_parameters(float *param, size_t param_size) {
   size_t pos = 0;
@@ -103,50 +96,48 @@ void alloc_and_set_parameters(float *param, size_t param_size) {
     exit(EXIT_FAILURE);
   }
 
-  CHECK_CUDA(cudaMalloc(&emb_w_d, 21635 * 4096 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&conv0_w_d, 1024 * 4096 * 3 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&conv0_b_d, 1024 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&conv1_w_d, 1024 * 4096 * 5 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&conv1_b_d, 1024 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&conv2_w_d, 1024 * 4096 * 7 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&conv2_b_d, 1024 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&conv3_w_d, 1024 * 4096 * 9 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&conv3_b_d, 1024 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&linear0_w_d, 2048 * 4096 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&linear0_b_d, 2048 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&linear1_w_d, 1024 * 2048 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&linear1_b_d, 1024 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&linear2_w_d, 512 * 1024 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&linear2_b_d, 512 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&linear3_w_d, 2 * 512 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&linear3_b_d, 2 * sizeof(float)));
+  for(int i = 0; i < NGPU; ++i){
+    cudaSetDevice(i);
+    CHECK_CUDA(cudaMalloc(&(emb_w_d[i]), 21635 * 4096 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(conv0_w_d[i]), 1024 * 4096 * 3 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(conv0_b_d[i]), 1024 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(conv1_w_d[i]), 1024 * 4096 * 5 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(conv1_b_d[i]), 1024 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(conv2_w_d[i]), 1024 * 4096 * 7 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(conv2_b_d[i]), 1024 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(conv3_w_d[i]), 1024 * 4096 * 9 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(conv3_b_d[i]), 1024 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(linear0_w_d[i]), 2048 * 4096 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(linear0_b_d[i]), 2048 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(linear1_w_d[i]), 1024 * 2048 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(linear1_b_d[i]), 1024 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(linear2_w_d[i]), 512 * 1024 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(linear2_b_d[i]), 512 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(linear3_w_d[i]), 2 * 512 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(linear3_b_d[i]), 2 * sizeof(float)));
 
+    CHECK_CUDA(cudaMemcpyAsync(emb_w_d[i], emb_w->buf, 21635 * 4096 * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyAsync(conv0_w_d[i], conv0_w->buf, 1024 * 4096 * 3 * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyAsync(conv0_b_d[i], conv0_b->buf, 1024 * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyAsync(conv1_w_d[i], conv1_w->buf, 1024 * 4096 * 5 * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyAsync(conv1_b_d[i], conv1_b->buf, 1024 * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyAsync(conv2_w_d[i], conv2_w->buf, 1024 * 4096 * 7 * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyAsync(conv2_b_d[i], conv2_b->buf, 1024 * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyAsync(conv3_w_d[i], conv3_w->buf, 1024 * 4096 * 9 * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyAsync(conv3_b_d[i], conv3_b->buf, 1024 * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyAsync(linear0_w_d[i], linear0_w->buf, 2048 * 4096 * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyAsync(linear0_b_d[i], linear0_b->buf, 2048 * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyAsync(linear1_w_d[i], linear1_w->buf, 1024 * 2048 * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyAsync(linear1_b_d[i], linear1_b->buf, 1024 * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyAsync(linear2_w_d[i], linear2_w->buf, 512 * 1024 * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyAsync(linear2_b_d[i], linear2_b->buf, 512 * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyAsync(linear3_w_d[i], linear3_w->buf, 2 * 512 * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpyAsync(linear3_b_d[i], linear3_b->buf, 2 * sizeof(float), cudaMemcpyHostToDevice));
+  }
 
-  CHECK_CUDA(cudaMemcpyAsync(emb_w_d, emb_w->buf, 21635 * 4096 * sizeof(float), cudaMemcpyHostToDevice));
-
-  CHECK_CUDA(cudaMemcpyAsync(conv0_w_d, conv0_w->buf, 1024 * 4096 * 3 * sizeof(float), cudaMemcpyHostToDevice));
-  CHECK_CUDA(cudaMemcpyAsync(conv0_b_d, conv0_b->buf, 1024 * sizeof(float), cudaMemcpyHostToDevice));
-
-  CHECK_CUDA(cudaMemcpyAsync(conv1_w_d, conv1_w->buf, 1024 * 4096 * 5 * sizeof(float), cudaMemcpyHostToDevice));
-  CHECK_CUDA(cudaMemcpyAsync(conv1_b_d, conv1_b->buf, 1024 * sizeof(float), cudaMemcpyHostToDevice));
-
-  CHECK_CUDA(cudaMemcpyAsync(conv2_w_d, conv2_w->buf, 1024 * 4096 * 7 * sizeof(float), cudaMemcpyHostToDevice));
-  CHECK_CUDA(cudaMemcpyAsync(conv2_b_d, conv2_b->buf, 1024 * sizeof(float), cudaMemcpyHostToDevice));
-
-  CHECK_CUDA(cudaMemcpyAsync(conv3_w_d, conv3_w->buf, 1024 * 4096 * 9 * sizeof(float), cudaMemcpyHostToDevice));
-  CHECK_CUDA(cudaMemcpyAsync(conv3_b_d, conv3_b->buf, 1024 * sizeof(float), cudaMemcpyHostToDevice));
-
-  CHECK_CUDA(cudaMemcpyAsync(linear0_w_d, linear0_w->buf, 2048 * 4096 * sizeof(float), cudaMemcpyHostToDevice));
-  CHECK_CUDA(cudaMemcpyAsync(linear0_b_d, linear0_b->buf, 2048 * sizeof(float), cudaMemcpyHostToDevice));
-
-  CHECK_CUDA(cudaMemcpyAsync(linear1_w_d, linear1_w->buf, 1024 * 2048 * sizeof(float), cudaMemcpyHostToDevice));
-  CHECK_CUDA(cudaMemcpyAsync(linear1_b_d, linear1_b->buf, 1024 * sizeof(float), cudaMemcpyHostToDevice));
-
-  CHECK_CUDA(cudaMemcpyAsync(linear2_w_d, linear2_w->buf, 512 * 1024 * sizeof(float), cudaMemcpyHostToDevice));
-  CHECK_CUDA(cudaMemcpyAsync(linear2_b_d, linear2_b->buf, 512 * sizeof(float), cudaMemcpyHostToDevice));
-
-  CHECK_CUDA(cudaMemcpyAsync(linear3_w_d, linear3_w->buf, 2 * 512 * sizeof(float), cudaMemcpyHostToDevice));
-  CHECK_CUDA(cudaMemcpyAsync(linear3_b_d, linear3_b->buf, 2 * sizeof(float), cudaMemcpyHostToDevice));
+  for (int i = 0; i < NGPU; ++i) {
+    CHECK_CUDA(cudaDeviceSynchronize());
+  }
 }
 
 void free_parameters() {
@@ -168,113 +159,83 @@ void free_parameters() {
   delete linear3_w;
   delete linear3_b;
 
-  CHECK_CUDA(cudaFree(emb_w_d));
-  CHECK_CUDA(cudaFree(conv0_w_d));
-  CHECK_CUDA(cudaFree(conv0_b_d));
-  CHECK_CUDA(cudaFree(conv1_w_d));
-  CHECK_CUDA(cudaFree(conv1_b_d));
-  CHECK_CUDA(cudaFree(conv2_w_d));
-  CHECK_CUDA(cudaFree(conv2_b_d));
-  CHECK_CUDA(cudaFree(conv3_w_d));
-  CHECK_CUDA(cudaFree(conv3_b_d));
-  CHECK_CUDA(cudaFree(linear0_w_d));
-  CHECK_CUDA(cudaFree(linear0_b_d));
-  CHECK_CUDA(cudaFree(linear1_w_d));
-  CHECK_CUDA(cudaFree(linear1_b_d));
-  CHECK_CUDA(cudaFree(linear3_w_d));
-  CHECK_CUDA(cudaFree(linear3_b_d));
+  for(int i = 0; i < NGPU; ++i){
+    cudaSetDevice(i);
+    CHECK_CUDA(cudaFree(emb_w_d[i]));
+    CHECK_CUDA(cudaFree(conv0_w_d[i]));
+    CHECK_CUDA(cudaFree(conv0_b_d[i]));
+    CHECK_CUDA(cudaFree(conv1_w_d[i]));
+    CHECK_CUDA(cudaFree(conv1_b_d[i]));
+    CHECK_CUDA(cudaFree(conv2_w_d[i]));
+    CHECK_CUDA(cudaFree(conv2_b_d[i]));
+    CHECK_CUDA(cudaFree(conv3_w_d[i]));
+    CHECK_CUDA(cudaFree(conv3_b_d[i]));
+    CHECK_CUDA(cudaFree(linear0_w_d[i]));
+    CHECK_CUDA(cudaFree(linear0_b_d[i]));
+    CHECK_CUDA(cudaFree(linear1_w_d[i]));
+    CHECK_CUDA(cudaFree(linear1_b_d[i]));
+    CHECK_CUDA(cudaFree(linear3_w_d[i]));
+    CHECK_CUDA(cudaFree(linear3_b_d[i]));
+  }
+
 }
 
 /* [Model Activations] 
  * _a: Activation buffer
  */
-Activation *emb_a;
-Activation *permute_a;
-Activation *conv0_a, *relu0_a, *pool0_a;
-Activation *conv1_a, *relu1_a, *pool1_a;
-Activation *conv2_a, *relu2_a, *pool2_a;
-Activation *conv3_a, *relu3_a, *pool3_a;
-Activation *concat_a;
-Activation *linear0_a, *linear1_a, *linear2_a, *linear3_a;
-
-static float *emb_a_d;
-static float *permute_a_d;
-static float *conv0_a_d, *pool0_a_d;
-static float *conv1_a_d, *pool1_a_d;
-static float *conv2_a_d, *pool2_a_d;
-static float *conv3_a_d, *pool3_a_d;
-static float *concat_a_d;
-static float *linear0_a_d;
-static float *linear1_a_d;
-static float *linear2_a_d;
-static float *linear3_a_d;
+static float *emb_a_d[NGPU];
+static float *permute_a_d[NGPU];
+static float *conv0_a_d[NGPU], *pool0_a_d[NGPU];
+static float *conv1_a_d[NGPU], *pool1_a_d[NGPU];
+static float *conv2_a_d[NGPU], *pool2_a_d[NGPU];
+static float *conv3_a_d[NGPU], *pool3_a_d[NGPU];
+static float *concat_a_d[NGPU];
+static float *linear0_a_d[NGPU];
+static float *linear1_a_d[NGPU];
+static float *linear2_a_d[NGPU];
+static float *linear3_a_d[NGPU];
+static int *d_inputs[NGPU];
 
 void alloc_activations() {
-  emb_a = new Activation({SEQ_LEN, 4096});
-  permute_a = new Activation({4096, SEQ_LEN});
-  conv0_a = new Activation({1024, SEQ_LEN - 2});
-  pool0_a = new Activation({1024});
-  conv1_a = new Activation({1024, SEQ_LEN - 4});
-  pool1_a = new Activation({1024});
-  conv2_a = new Activation({1024, SEQ_LEN - 6});
-  pool2_a = new Activation({1024});
-  conv3_a = new Activation({1024, SEQ_LEN - 8});
-  pool3_a = new Activation({1024});
-  concat_a = new Activation({4096});
-  linear0_a = new Activation({2048});
-  linear1_a = new Activation({1024});
-  linear2_a = new Activation({512});
-  linear3_a = new Activation({2});
-
-  CHECK_CUDA(cudaMalloc(&emb_a_d, SEQ_LEN * 4096 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&permute_a_d, 4096 * SEQ_LEN * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&conv0_a_d, 1024 * (SEQ_LEN - 2) * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&pool0_a_d, 1024 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&conv1_a_d, 1024 * (SEQ_LEN - 4) * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&pool1_a_d, 1024 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&conv2_a_d, 1024 * (SEQ_LEN - 6) * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&pool2_a_d, 1024 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&conv3_a_d, 1024 * (SEQ_LEN - 8) * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&pool3_a_d, 1024 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&concat_a_d, 4096 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&linear0_a_d, 2048 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&linear1_a_d, 1024 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&linear2_a_d, 512 * sizeof(float)));
-  CHECK_CUDA(cudaMalloc(&linear3_a_d, 2 * sizeof(float)));
+  for(int i = 0 ; i < NGPU; ++i){
+    cudaSetDevice(i);
+    CHECK_CUDA(cudaMalloc(&(d_inputs[i]), MAX_SAMPLES * SEQ_LEN * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&(emb_a_d[i]), SEQ_LEN * 4096 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(permute_a_d[i]), 4096 * SEQ_LEN * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(conv0_a_d[i]), 1024 * (SEQ_LEN - 2) * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(pool0_a_d[i]), 1024 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(conv1_a_d[i]), 1024 * (SEQ_LEN - 4) * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(pool1_a_d[i]), 1024 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(conv2_a_d[i]), 1024 * (SEQ_LEN - 6) * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(pool2_a_d[i]), 1024 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(conv3_a_d[i]), 1024 * (SEQ_LEN - 8) * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(pool3_a_d[i]), 1024 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(concat_a_d[i]), 4096 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(linear0_a_d[i]), 2048 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(linear1_a_d[i]), 1024 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(linear2_a_d[i]), 512 * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&(linear3_a_d[i]), 2 * sizeof(float)));
+  }
 }
 
 void free_activations() {
-  delete emb_a;
-  delete permute_a;
-  delete conv0_a;
-  delete pool0_a;
-  delete conv1_a;
-  delete pool1_a;
-  delete conv2_a;
-  delete pool2_a;
-  delete conv3_a;
-  delete pool3_a;
-  delete concat_a;
-  delete linear0_a;
-  delete linear1_a;
-  delete linear2_a;
-  delete linear3_a;
-
-  CHECK_CUDA(cudaFree(emb_a_d));
-  CHECK_CUDA(cudaFree(permute_a_d));
-  CHECK_CUDA(cudaFree(conv0_a_d));
-  CHECK_CUDA(cudaFree(pool0_a_d));
-  CHECK_CUDA(cudaFree(conv1_a_d));
-  CHECK_CUDA(cudaFree(pool1_a_d));
-  CHECK_CUDA(cudaFree(conv2_a_d));
-  CHECK_CUDA(cudaFree(pool2_a_d));
-  CHECK_CUDA(cudaFree(conv3_a_d));
-  CHECK_CUDA(cudaFree(pool3_a_d));
-  CHECK_CUDA(cudaFree(concat_a_d));
-  CHECK_CUDA(cudaFree(linear0_a_d));
-  CHECK_CUDA(cudaFree(linear1_a_d));
-  CHECK_CUDA(cudaFree(linear2_a_d));
-  CHECK_CUDA(cudaFree(linear3_a_d));
+  for(int i = 0; i < NGPU; ++i){
+    CHECK_CUDA(cudaFree(emb_a_d[i]));
+    CHECK_CUDA(cudaFree(permute_a_d[i]));
+    CHECK_CUDA(cudaFree(conv0_a_d[i]));
+    CHECK_CUDA(cudaFree(pool0_a_d[i]));
+    CHECK_CUDA(cudaFree(conv1_a_d[i]));
+    CHECK_CUDA(cudaFree(pool1_a_d[i]));
+    CHECK_CUDA(cudaFree(conv2_a_d[i]));
+    CHECK_CUDA(cudaFree(pool2_a_d[i]));
+    CHECK_CUDA(cudaFree(conv3_a_d[i]));
+    CHECK_CUDA(cudaFree(pool3_a_d[i]));
+    CHECK_CUDA(cudaFree(concat_a_d[i]));
+    CHECK_CUDA(cudaFree(linear0_a_d[i]));
+    CHECK_CUDA(cudaFree(linear1_a_d[i]));
+    CHECK_CUDA(cudaFree(linear2_a_d[i]));
+    CHECK_CUDA(cudaFree(linear3_a_d[i]));
+  }
 }
 
 /* [Model Computation: Sentiment Analysis Task] */
@@ -283,45 +244,46 @@ void predict_sentiment(int *inputs, float *outputs, size_t n_samples) {
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
 
   if (mpi_rank == 0) {
-    /* Predict sentiment for each sentence */
-    int *d_inputs;
-    size_t input_size = n_samples * SEQ_LEN * sizeof(int);
-    CHECK_CUDA(cudaMalloc(&d_inputs, input_size));
-    CHECK_CUDA(cudaMemcpy(d_inputs, inputs, input_size, cudaMemcpyHostToDevice));
+    // Predict sentiment for each sentence 
+    #pragma omp parallel for num_threads(NGPU)
+    for (int gpu_idx = 0; gpu_idx < NGPU; gpu_idx++){
+      int start_idx = gpu_idx * (n_samples / NGPU);
+      int end_idx = start_idx + (n_samples / NGPU);
 
-    for (size_t n = 0; n < n_samples; n++){
-      /* Load a sentence from the inputs */
-      int *single_input = d_inputs + n * SEQ_LEN;
+      cudaSetDevice(gpu_idx);
+      CHECK_CUDA(cudaMemcpy(d_inputs[gpu_idx], inputs + start_idx * SEQ_LEN, 
+                            (n_samples / NGPU) * SEQ_LEN * sizeof(int), cudaMemcpyHostToDevice));
+      for (int n = start_idx; n < end_idx; n++) {
+        int *single_input = d_inputs[gpu_idx] + (n - start_idx) * SEQ_LEN;
+        // Embedding
+        Embedding(single_input, emb_w_d[gpu_idx], emb_a_d[gpu_idx], SEQ_LEN, 4096);
 
-      // Embedding
-      Embedding(single_input, emb_w_d, emb_a_d, SEQ_LEN, 4096);
+        // Permute
+        Permute(emb_a_d[gpu_idx], permute_a_d[gpu_idx], SEQ_LEN, 4096);
 
-      // Permute
-      Permute(emb_a_d, permute_a_d, SEQ_LEN, 4096);
+        // Conv1D and GetMax
+        Conv1D(permute_a_d[gpu_idx], conv0_w_d[gpu_idx], conv0_b_d[gpu_idx], conv0_a_d[gpu_idx], SEQ_LEN, 4096, 1024, 3);
+        GetMax(conv0_a_d[gpu_idx], pool0_a_d[gpu_idx], 1024, SEQ_LEN - 2);
+        Conv1D(permute_a_d[gpu_idx], conv1_w_d[gpu_idx], conv1_b_d[gpu_idx], conv1_a_d[gpu_idx], SEQ_LEN, 4096, 1024, 5);
+        GetMax(conv1_a_d[gpu_idx], pool1_a_d[gpu_idx], 1024, SEQ_LEN - 4);
+        Conv1D(permute_a_d[gpu_idx], conv2_w_d[gpu_idx], conv2_b_d[gpu_idx], conv2_a_d[gpu_idx], SEQ_LEN, 4096, 1024, 7);
+        GetMax(conv2_a_d[gpu_idx], pool2_a_d[gpu_idx], 1024, SEQ_LEN - 6);
+        Conv1D(permute_a_d[gpu_idx], conv3_w_d[gpu_idx], conv3_b_d[gpu_idx], conv3_a_d[gpu_idx], SEQ_LEN, 4096, 1024, 9);
+        GetMax(conv3_a_d[gpu_idx], pool3_a_d[gpu_idx], 1024, SEQ_LEN - 8);
 
-      // Conv1D and GetMax
-      Conv1D(permute_a_d, conv0_w_d, conv0_b_d, conv0_a_d, SEQ_LEN, 4096, 1024, 3);
-      GetMax(conv0_a_d, pool0_a_d, 1024, SEQ_LEN - 2);
-      Conv1D(permute_a_d, conv1_w_d, conv1_b_d, conv1_a_d, SEQ_LEN, 4096, 1024, 5);
-      GetMax(conv1_a_d, pool1_a_d, 1024, SEQ_LEN - 4);
-      Conv1D(permute_a_d, conv2_w_d, conv2_b_d, conv2_a_d, SEQ_LEN, 4096, 1024, 7);
-      GetMax(conv2_a_d, pool2_a_d, 1024, SEQ_LEN - 6);
-      Conv1D(permute_a_d, conv3_w_d, conv3_b_d, conv3_a_d, SEQ_LEN, 4096, 1024, 9);
-      GetMax(conv3_a_d, pool3_a_d, 1024, SEQ_LEN - 8);
+        // Concat
+        Concat(pool0_a_d[gpu_idx], pool1_a_d[gpu_idx], pool2_a_d[gpu_idx], pool3_a_d[gpu_idx], concat_a_d[gpu_idx], 1024, 1024, 1024, 1024);
 
-      // Concat
-      Concat(pool0_a_d, pool1_a_d, pool2_a_d, pool3_a_d, concat_a_d, 1024, 1024, 1024, 1024);
+        // Fully Connected Layers
+        Linear_ReLU(concat_a_d[gpu_idx], linear0_w_d[gpu_idx], linear0_b_d[gpu_idx], linear0_a_d[gpu_idx], 4096, 2048);
+        Linear_ReLU(linear0_a_d[gpu_idx], linear1_w_d[gpu_idx], linear1_b_d[gpu_idx], linear1_a_d[gpu_idx], 2048, 1024);
+        Linear_ReLU(linear1_a_d[gpu_idx], linear2_w_d[gpu_idx], linear2_b_d[gpu_idx], linear2_a_d[gpu_idx], 1024, 512);
+        Linear(linear2_a_d[gpu_idx], linear3_w_d[gpu_idx], linear3_b_d[gpu_idx], linear3_a_d[gpu_idx], 512, 2);
 
-      // Fully Connected Layers
-      Linear_ReLU(concat_a_d, linear0_w_d, linear0_b_d, linear0_a_d, 4096, 2048);
-      Linear_ReLU(linear0_a_d, linear1_w_d, linear1_b_d, linear1_a_d, 2048, 1024);
-      Linear_ReLU(linear1_a_d, linear2_w_d, linear2_b_d, linear2_a_d, 1024, 512);
-      Linear(linear2_a_d, linear3_w_d, linear3_b_d, linear3_a_d, 512, 2);
-
-
-      // Copy the computation result to the outputs
-      CHECK_CUDA(cudaMemcpy(outputs + n * 2, linear3_a_d, 2 * sizeof(float), cudaMemcpyDeviceToHost));
-      // memcpy(outputs + n * 2, linear3_a->buf, 2 * sizeof(float));
+        // Copy the computation result to the outputs
+        CHECK_CUDA(cudaMemcpy(outputs + n * 2, linear3_a_d[gpu_idx], 
+                              2 * sizeof(float), cudaMemcpyDeviceToHost));
+      }
     }
   }
 }
