@@ -25,8 +25,9 @@
 
 ## Optimization History
 
--   Baseline: 0.12 input(s)/sec
--   Synchronous offload: 8.19 input(s)/sec
--   GPU computation: 95 input(s)/sec
--   Multi-GPU: 260 input(s)/sec
--   Stream: 272 input(s)/sec
+-   Baseline: 0.12 (sentences/sec)
+-   Synchronous offload: 8.19 (sentences/sec)
+-   GPU computation: 95 (sentences/sec)
+-   Multi-GPU: 260 (sentences/sec)
+-   Multi-Stream: 272 (sentences/sec)
+-   Linear kernel code: 303.073489 (sentences/sec)

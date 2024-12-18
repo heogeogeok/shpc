@@ -2,6 +2,12 @@
 
 #define div(x, y) (((x) + (y) -1) / (y))
 
+/** SECTION: Hyperparams **/
+#define LINEAR_BM 8
+#define C1D_BM 16
+#define C1D_BN 4
+#define C1D_BK 4
+
 /** SECTION: DEBUGGING **/
 #define DEBUG 0
 #if DEBUG == 1
@@ -40,21 +46,20 @@ __global__ void kpermute(const float *in, float *out, size_t s, size_t H) {
 /* Conv1D CUDA kernel */
 __global__ void kconv1d(float *in, float *w, float *b, float *out, 
                               int C, int K, int s, int OC, int os){
-    int oc = blockIdx.x * blockDim.x + threadIdx.x; 
-    int j = blockIdx.y * blockDim.y + threadIdx.y; 
+  int oc = blockIdx.x * blockDim.x + threadIdx.x; 
+  int j = blockIdx.y * blockDim.y + threadIdx.y; 
 
-    if (oc < OC && j < os) {
-        float val = 0.0f;
+  if (oc < OC && j < os) {
+      float val = 0.0f;
 
-        for (int k = 0; k < C; k++) {          
-            for (int l = 0; l < K; l++) {      
-                val += in[k * s + j + l] * w[oc * C * K + k * K + l];
-            }
-        }
-
-        val += b[oc];
-        out[oc * os + j] = val > 0.0f ? val : 0.0f;
-    }
+      for (int k = 0; k < C; k++) {          
+          for (int l = 0; l < K; l++) {      
+              val += in[k * s + j + l] * w[oc * C * K + k * K + l];
+          }
+      }
+      val += b[oc];
+      out[oc * os + j] = val > 0.0f ? val : 0.0f;
+  }
 }
 
 /* GetMax CUDA kernel */
@@ -92,21 +97,52 @@ __global__ void kconcat(const float *in1, const float *in2, const float *in3, co
 
 /* Linear CUDA kernel */
 __global__ void klinear(float *in, float *w, float *b, float *out, int N, int M, bool relu) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int TILESIZE = LINEAR_BM;
+  __shared__ float t_in[TILESIZE];
+  __shared__ float t_w[TILESIZE][TILESIZE];
 
-    if (i < M) {
-        float val = 0.f;
-        for (int j = 0; j < N; j++) {
-            val += in[j] * w[i * N + j];
-        }
+  int i = threadIdx.x;
+  int row = blockIdx.x * blockDim.x + i;
 
-        val += b[i];
-        if (relu) {
-            val = fmaxf(val, 0.0f);
-        }
-        out[i] = val;
+  float val = 0.0f;
+  int ntiles = div(N, TILESIZE);
+  for (int t = 0; t < ntiles; t++) {
+    // load inputs
+    t_in[i] = in[t * TILESIZE + i];
+    
+    // load weights
+    for (int j = 0; j < TILESIZE; j++) {
+        int col = t * TILESIZE + j;
+        t_w[i][j] = w[row * N + col];
     }
+    __syncthreads();
+
+    // compute
+    for (int j = 0; j < TILESIZE; j++)
+        val += t_in[j] * t_w[i][j];
+
+    __syncthreads();
+  }
+
+  // store
+  out[row] = val + b[row];
+  if (relu) out[row] = fmaxf(out[row], 0.0f);
 }
+
+// __global__ void klinear(float *in, float *w, float *b, float *out, int N, int M, bool relu) {
+//     // if (i < M) {
+//     //     float val = 0.f;
+//     //     for (int j = 0; j < N; j++) {
+//     //         val += in[j] * w[i * N + j];
+//     //     }
+
+//     //     val += b[i];
+//     //     if (relu) {
+//     //         val = fmaxf(val, 0.0f);
+//     //     }
+//     //     out[i] = val;
+//     // }
+// }
 
 /* Embedding
  * @param [in1]  in: [s]
@@ -117,8 +153,8 @@ __global__ void klinear(float *in, float *w, float *b, float *out, int N, int M,
  */
 
 void Embedding(int *in, float* w, float *out, size_t s, size_t H) {
-  dim3 blockDim(16, 16);
-  dim3 gridDim((H + blockDim.x - 1) / blockDim.x, (s + blockDim.y - 1) / blockDim.y);
+  dim3 blockDim(8, 16);
+  dim3 gridDim(div(H, blockDim.x), div(s, blockDim.y));
 
   kembedding<<<gridDim, blockDim>>>(in, w, out, s, H);
 }
@@ -128,8 +164,8 @@ void Embedding(int *in, float* w, float *out, size_t s, size_t H) {
  * @param [out] out: [N, M]
  */
 void Permute(float *in, float *out, size_t s, size_t H) {
-  dim3 blockDim(16, 16);
-  dim3 gridDim((H + blockDim.x - 1) / blockDim.x, (s + blockDim.y - 1) / blockDim.y);
+  dim3 blockDim(32, 8);
+  dim3 gridDim(div(H, blockDim.x), div(s, blockDim.y));
 
   kpermute<<<gridDim, blockDim>>>(in, out, s, H);
 }
@@ -153,15 +189,34 @@ void Permute(float *in, float *out, size_t s, size_t H) {
  * 'os' is the output sequence length
  * 'K' is the kernel (or filter) size
  */
-void Conv1D(float *in, float *w, float *b, float *out, size_t s, size_t C, size_t OC, size_t K, cudaStream_t stream){
+void Conv1D_K3(float *in, float *w, float *b, float *out, size_t s, size_t C, size_t OC, size_t K, cudaStream_t stream){
   size_t os = s - K + 1;
-
-  dim3 blockDim(16, 16);
-  dim3 gridDim((OC + 15) / 16, (os + 15) / 16);
+  dim3 blockDim(16, 4);
+  dim3 gridDim(div(OC, blockDim.x), div(os, blockDim.y));
 
   kconv1d<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, C, K, s, OC, os);
 }
 
+void Conv1D_K5(float *in, float *w, float *b, float *out, size_t s, size_t C, size_t OC, size_t K, cudaStream_t stream){
+  size_t os = s - K + 1;
+  dim3 blockDim(16, 4);
+  dim3 gridDim(div(OC, blockDim.x), div(os, blockDim.y));
+  kconv1d<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, C, K, s, OC, os);
+}
+
+void Conv1D_K7(float *in, float *w, float *b, float *out, size_t s, size_t C, size_t OC, size_t K, cudaStream_t stream){
+  size_t os = s - K + 1;
+  dim3 blockDim(16, 8);
+  dim3 gridDim(div(OC, blockDim.x), div(os, blockDim.y));
+  kconv1d<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, C, K, s, OC, os);
+}
+
+void Conv1D_K9(float *in, float *w, float *b, float *out, size_t s, size_t C, size_t OC, size_t K, cudaStream_t stream){
+  size_t os = s - K + 1;
+  dim3 blockDim(16, 16);
+  dim3 gridDim(div(OC, blockDim.x), div(os, blockDim.y));
+  kconv1d<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, C, K, s, OC, os);
+}
 
 /* GetMax
  * @param [in]   in: [C, s]
@@ -175,10 +230,8 @@ void Conv1D(float *in, float *w, float *b, float *out, size_t s, size_t C, size_
  */
 void GetMax(float *in, float *out, size_t C, size_t s, cudaStream_t stream){
   dim3 blockDim(256);  
-  dim3 gridDim((C + blockDim.x - 1) / blockDim.x);
-
+  dim3 gridDim(div(C, blockDim.x));
   kgetmax<<<gridDim, blockDim, 0, stream>>>(in, out, s, C);
-
 }
 
 /* Concat
@@ -192,8 +245,7 @@ void GetMax(float *in, float *out, size_t C, size_t s, cudaStream_t stream){
 void Concat(float *in1, float *in2, float *in3, float *in4, 
             float *out, size_t N1, size_t N2, size_t N3, size_t N4, cudaStream_t stream) {
   dim3 blockDim(256);
-  dim3 gridDim((N1 + N2 + N3 + N4 + blockDim.x - 1) / blockDim.x);
-
+  dim3 gridDim(div((N1 + N2 + N3 + N4), blockDim.x));
   kconcat<<<gridDim, blockDim, 0, stream>>>(in1, in2, in3, in4, out, N1, N2, N3, N4);
 }
 
@@ -206,15 +258,14 @@ void Concat(float *in1, float *in2, float *in3, float *in4,
  * 'M' is the output feature size
  */
 void Linear_ReLU(float *in, float *w, float *b, float *out, int N, int M, cudaStream_t stream) {
-    int blockDim = 256;
-    int gridDim = (M + blockDim - 1) / blockDim;
+    int blockDim(LINEAR_BM);
+    int gridDim(div(M, blockDim));
     klinear<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, N, M, true);
 }
 
 // Final result
 void Linear(float *in, float *w, float *b, float *out, int N, int M, cudaStream_t stream) {
-    int blockDim = 256;
-    int gridDim = (M + blockDim - 1) / blockDim;
-
+    int blockDim(LINEAR_BM);
+    int gridDim(div(M, blockDim));
     klinear<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, N, M, false);
 }
