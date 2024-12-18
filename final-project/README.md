@@ -19,7 +19,6 @@
 
 -   [x] Caculate each opeartor with multi-gpu
 -   [ ] Calculate multiple batches at once
--   [ ] Calculate multiple batches at once
 -   [ ] Synchronously offload input to other nodes using MPI
 -   [ ] Asynchronously offload input to other nodes using MPI
 
@@ -29,5 +28,5 @@
 -   Synchronous offload: 8.19 (sentences/sec)
 -   GPU computation: 95 (sentences/sec)
 -   Multi-GPU: 260 (sentences/sec)
--   Multi-Stream: 272 (sentences/sec)
+-   Stream: 272 (sentences/sec)
 -   Linear kernel code: 303.073489 (sentences/sec)
