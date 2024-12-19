@@ -19,7 +19,7 @@
 
 -   [x] Caculate each opeartor with multi-gpu
 -   [ ] Calculate multiple batches at once
--   [ ] Synchronously offload input to other nodes using MPI
+-   [x] Synchronously offload input to other nodes using MPI
 -   [ ] Asynchronously offload input to other nodes using MPI
 
 ## Optimization History
@@ -30,3 +30,4 @@
 -   Multi-GPU: 260 (sentences/sec)
 -   Stream: 272 (sentences/sec)
 -   Linear kernel code: 303.073489 (sentences/sec)
+-   Synchronously offload input to other nodes using MPI 1100.580692 (sentences/sec)

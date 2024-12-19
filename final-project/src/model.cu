@@ -13,7 +13,7 @@ int mpi_rank, mpi_size;
 #if DEBUG == 1
 double dbg_start_time, dbg_ce_init, dbg_ce_final;
 #define DEBUG_PRINT(...) do { \
-  printf("(%s|rank=%d) ", mpi_rank); \
+  printf("(rank=%d) ", mpi_rank); \
   printf(__VA_ARGS__); \
 } while (0)
 #else
@@ -267,74 +267,98 @@ void free_activations() {
 
 /* [Model Computation: Sentiment Analysis Task] */
 void predict_sentiment(int *inputs, float *outputs, size_t n_samples) {
+
   MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
 
-  if (mpi_rank == 0) {
-    // Predict sentiment for each sentence 
-    #pragma omp parallel for num_threads(NGPU)
-    for (int gpu_idx = 0; gpu_idx < NGPU; gpu_idx++){
-      int start_idx = gpu_idx * (n_samples / NGPU);
-      int end_idx = start_idx + (n_samples / NGPU);
+  size_t inputs_size = MAX_SAMPLES * SEQ_LEN * sizeof(int);
+  size_t outputs_size = MAX_SAMPLES * 2 * sizeof(float);
+  if (mpi_rank != 0)
+  {
+    inputs = (int *) malloc(inputs_size);
+    outputs = (float *) malloc(outputs_size);
+  }
 
-      CHECK_CUDA(cudaSetDevice(gpu_idx));
-      CHECK_CUDA(cudaMemcpyAsync(d_inputs[gpu_idx], inputs + start_idx * SEQ_LEN, 
-                            (n_samples / NGPU) * SEQ_LEN * sizeof(int), cudaMemcpyHostToDevice, _gpu_stream_h2d[gpu_idx]));
+  MPI_Scatter(inputs, n_samples * SEQ_LEN / NNODE, MPI_INT,
+                inputs, n_samples * SEQ_LEN / NNODE, MPI_INT,
+                0, MPI_COMM_WORLD);
 
-      CHECK_CUDA(cudaEventRecord(_event_h2d[gpu_idx], _gpu_stream_h2d[gpu_idx]));
-      for (int j = 0; j < 4; j++) {
-        CHECK_CUDA(cudaStreamWaitEvent(_gpu_stream_comp[gpu_idx][j], _event_h2d[gpu_idx], 0));
-      }
+  // Predict sentiment for each sentence 
+  #pragma omp parallel for num_threads(NGPU)
+  for (int gpu_idx = 0; gpu_idx < NGPU; gpu_idx++){
+    int start_idx = gpu_idx * (n_samples / NNODE / NGPU);
+    int end_idx = (gpu_idx + 1) * (n_samples / NNODE / NGPU);
 
-      for (int n = start_idx; n < end_idx; n++) {
-        int *single_input = d_inputs[gpu_idx] + (n - start_idx) * SEQ_LEN;
-        // Embedding
-        Embedding(single_input, emb_w_d[gpu_idx], emb_a_d[gpu_idx], SEQ_LEN, 4096);
+    CHECK_CUDA(cudaSetDevice(gpu_idx));
+    CHECK_CUDA(cudaMemcpyAsync(d_inputs[gpu_idx], inputs + start_idx * SEQ_LEN, 
+                          (n_samples / NNODE / NGPU) * SEQ_LEN * sizeof(int), cudaMemcpyHostToDevice, _gpu_stream_h2d[gpu_idx]));
 
-        // Permute
-        Permute(emb_a_d[gpu_idx], permute_a_d[gpu_idx], SEQ_LEN, 4096);
-
-        // Conv1D and GetMax
-        Conv1D(permute_a_d[gpu_idx], conv0_w_d[gpu_idx], conv0_b_d[gpu_idx], conv0_a_d[gpu_idx], SEQ_LEN, 4096, 1024, 3, _gpu_stream_comp[gpu_idx][0]);
-        GetMax(conv0_a_d[gpu_idx], pool0_a_d[gpu_idx], 1024, SEQ_LEN - 2, _gpu_stream_comp[gpu_idx][0]);
-
-        Conv1D(permute_a_d[gpu_idx], conv1_w_d[gpu_idx], conv1_b_d[gpu_idx], conv1_a_d[gpu_idx], SEQ_LEN, 4096, 1024, 5, _gpu_stream_comp[gpu_idx][1]);
-        GetMax(conv1_a_d[gpu_idx], pool1_a_d[gpu_idx], 1024, SEQ_LEN - 4, _gpu_stream_comp[gpu_idx][1]);
-
-        Conv1D(permute_a_d[gpu_idx], conv2_w_d[gpu_idx], conv2_b_d[gpu_idx], conv2_a_d[gpu_idx], SEQ_LEN, 4096, 1024, 7, _gpu_stream_comp[gpu_idx][2]);
-        GetMax(conv2_a_d[gpu_idx], pool2_a_d[gpu_idx], 1024, SEQ_LEN - 6, _gpu_stream_comp[gpu_idx][2]);
-
-        Conv1D(permute_a_d[gpu_idx], conv3_w_d[gpu_idx], conv3_b_d[gpu_idx], conv3_a_d[gpu_idx], SEQ_LEN, 4096, 1024, 9, _gpu_stream_comp[gpu_idx][3]);
-        GetMax(conv3_a_d[gpu_idx], pool3_a_d[gpu_idx], 1024, SEQ_LEN - 8, _gpu_stream_comp[gpu_idx][3]);
-
-        for (int j = 0; j < 4; j++) {
-          CHECK_CUDA(cudaEventRecord(_event_comp[gpu_idx][j], _gpu_stream_comp[gpu_idx][j]));
-          CHECK_CUDA(cudaStreamWaitEvent(_gpu_stream_comp[gpu_idx][0], _event_comp[gpu_idx][j], 0));
-        }
-
-        // Concat 
-        Concat(pool0_a_d[gpu_idx], pool1_a_d[gpu_idx], pool2_a_d[gpu_idx], pool3_a_d[gpu_idx], concat_a_d[gpu_idx], 1024, 1024, 1024, 1024, _gpu_stream_comp[gpu_idx][0]);
-
-        // Fully Connected Layers
-        Linear_ReLU(concat_a_d[gpu_idx], linear0_w_d[gpu_idx], linear0_b_d[gpu_idx], 
-                    linear0_a_d[gpu_idx], 4096, 2048, _gpu_stream_comp[gpu_idx][0]);
-
-        Linear_ReLU(linear0_a_d[gpu_idx], linear1_w_d[gpu_idx], linear1_b_d[gpu_idx], 
-                    linear1_a_d[gpu_idx], 2048, 1024, _gpu_stream_comp[gpu_idx][0]);
-
-        Linear_ReLU(linear1_a_d[gpu_idx], linear2_w_d[gpu_idx], linear2_b_d[gpu_idx], 
-                    linear2_a_d[gpu_idx], 1024, 512, _gpu_stream_comp[gpu_idx][0]);
-
-        Linear(linear2_a_d[gpu_idx], linear3_w_d[gpu_idx], linear3_b_d[gpu_idx], 
-              linear3_a_d[gpu_idx], 512, 2, _gpu_stream_comp[gpu_idx][0]);
-
-        CHECK_CUDA(cudaEventRecord(_event_d2h[gpu_idx], _gpu_stream_comp[gpu_idx][0]));
-        CHECK_CUDA(cudaStreamWaitEvent(_gpu_stream_d2h[gpu_idx], _event_d2h[gpu_idx], 0));
-
-        // Copy the computation result to the outputs
-        CHECK_CUDA(cudaMemcpyAsync(outputs + n * 2, linear3_a_d[gpu_idx], 
-                              2 * sizeof(float), cudaMemcpyDeviceToHost, _gpu_stream_d2h[gpu_idx]));
-      }
+    CHECK_CUDA(cudaEventRecord(_event_h2d[gpu_idx], _gpu_stream_h2d[gpu_idx]));
+    for (int j = 0; j < 4; j++) {
+      CHECK_CUDA(cudaStreamWaitEvent(_gpu_stream_comp[gpu_idx][j], _event_h2d[gpu_idx], 0));
     }
+
+    for (int n = start_idx; n < end_idx; n++) {
+      int *single_input = d_inputs[gpu_idx] + (n - start_idx) * SEQ_LEN;
+      // Embedding
+      Embedding(single_input, emb_w_d[gpu_idx], emb_a_d[gpu_idx], SEQ_LEN, 4096);
+
+      // Permute
+      Permute(emb_a_d[gpu_idx], permute_a_d[gpu_idx], SEQ_LEN, 4096);
+
+      // Conv1D and GetMax
+      Conv1D_K3(permute_a_d[gpu_idx], conv0_w_d[gpu_idx], conv0_b_d[gpu_idx], conv0_a_d[gpu_idx], SEQ_LEN, 4096, 1024, 3, _gpu_stream_comp[gpu_idx][0]);
+      GetMax(conv0_a_d[gpu_idx], pool0_a_d[gpu_idx], 1024, SEQ_LEN - 2, _gpu_stream_comp[gpu_idx][0]);
+
+      Conv1D_K5(permute_a_d[gpu_idx], conv1_w_d[gpu_idx], conv1_b_d[gpu_idx], conv1_a_d[gpu_idx], SEQ_LEN, 4096, 1024, 5, _gpu_stream_comp[gpu_idx][1]);
+      GetMax(conv1_a_d[gpu_idx], pool1_a_d[gpu_idx], 1024, SEQ_LEN - 4, _gpu_stream_comp[gpu_idx][1]);
+
+      Conv1D_K7(permute_a_d[gpu_idx], conv2_w_d[gpu_idx], conv2_b_d[gpu_idx], conv2_a_d[gpu_idx], SEQ_LEN, 4096, 1024, 7, _gpu_stream_comp[gpu_idx][2]);
+      GetMax(conv2_a_d[gpu_idx], pool2_a_d[gpu_idx], 1024, SEQ_LEN - 6, _gpu_stream_comp[gpu_idx][2]);
+
+      Conv1D_K9(permute_a_d[gpu_idx], conv3_w_d[gpu_idx], conv3_b_d[gpu_idx], conv3_a_d[gpu_idx], SEQ_LEN, 4096, 1024, 9, _gpu_stream_comp[gpu_idx][3]);
+      GetMax(conv3_a_d[gpu_idx], pool3_a_d[gpu_idx], 1024, SEQ_LEN - 8, _gpu_stream_comp[gpu_idx][3]);
+
+      for (int j = 0; j < 4; j++) {
+        CHECK_CUDA(cudaEventRecord(_event_comp[gpu_idx][j], _gpu_stream_comp[gpu_idx][j]));
+        CHECK_CUDA(cudaStreamWaitEvent(_gpu_stream_comp[gpu_idx][0], _event_comp[gpu_idx][j], 0));
+      }
+
+      // Concat 
+      Concat(pool0_a_d[gpu_idx], pool1_a_d[gpu_idx], pool2_a_d[gpu_idx], pool3_a_d[gpu_idx], concat_a_d[gpu_idx], 1024, 1024, 1024, 1024, _gpu_stream_comp[gpu_idx][0]);
+
+      // Fully Connected Layers
+      Linear_ReLU(concat_a_d[gpu_idx], linear0_w_d[gpu_idx], linear0_b_d[gpu_idx], 
+                  linear0_a_d[gpu_idx], 4096, 2048, _gpu_stream_comp[gpu_idx][0]);
+
+      Linear_ReLU(linear0_a_d[gpu_idx], linear1_w_d[gpu_idx], linear1_b_d[gpu_idx], 
+                  linear1_a_d[gpu_idx], 2048, 1024, _gpu_stream_comp[gpu_idx][0]);
+
+      Linear_ReLU(linear1_a_d[gpu_idx], linear2_w_d[gpu_idx], linear2_b_d[gpu_idx], 
+                  linear2_a_d[gpu_idx], 1024, 512, _gpu_stream_comp[gpu_idx][0]);
+
+      Linear(linear2_a_d[gpu_idx], linear3_w_d[gpu_idx], linear3_b_d[gpu_idx], 
+            linear3_a_d[gpu_idx], 512, 2, _gpu_stream_comp[gpu_idx][0]);
+
+      CHECK_CUDA(cudaEventRecord(_event_d2h[gpu_idx], _gpu_stream_comp[gpu_idx][0]));
+      CHECK_CUDA(cudaStreamWaitEvent(_gpu_stream_d2h[gpu_idx], _event_d2h[gpu_idx], 0));
+
+      // Copy the computation result to the outputs
+      CHECK_CUDA(cudaMemcpyAsync(outputs + n * N_CLASSES, linear3_a_d[gpu_idx], 
+                            N_CLASSES * sizeof(float), cudaMemcpyDeviceToHost, _gpu_stream_d2h[gpu_idx]));
+
+    }
+  }
+  for (int i = 0; i < NGPU; ++i) {
+    CHECK_CUDA(cudaDeviceSynchronize());
+  }
+
+  MPI_Gather(outputs, n_samples * N_CLASSES / NNODE, MPI_FLOAT,
+               outputs, n_samples * N_CLASSES / NNODE, MPI_FLOAT,
+               0, MPI_COMM_WORLD);
+  if (mpi_rank != 0)
+  {
+    free(inputs);
+    free(outputs);
   }
 }
