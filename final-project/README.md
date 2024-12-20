@@ -9,7 +9,7 @@
         -   `Permute`: Naive
         -   `ReLU`: All merged into the other operators
         -   `GetMax`: Naive
-        -   `Linear`: Naive
+        -   `Linear`: Naive, Tiling
 
 -   [x] Create weakly fused operators: `Conv1D_ReLU`, `Linear_ReLU`, etc.
 
@@ -32,3 +32,4 @@
 -   MPI offload: 1100.58 (sentences/sec)
 -   Convolution kernel code: 2826.95 (sentences/sec)
 -   Hyperparemeter: 3545.14 (sentences/sec)
+-   Linear kernel code: 3584.62 (sentences/sec)

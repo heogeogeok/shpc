@@ -2,8 +2,12 @@
 
 #define div(x, y) (((x) + (y) -1) / (y))
 
-/** SECTION: Hyperparams **/
-#define LINEAR_BM 32
+/** BLOCK SIZE **/
+#define LIN_NAIVE_BN 4
+
+#define LIN_REG_BN 16
+#define LIN_REG_BK 32
+
 #define C1D_K3_BM 16
 #define C1D_K3_BN 8
 #define C1D_K3_BK 8
@@ -20,18 +24,7 @@
 #define C1D_K9_BN 32
 #define C1D_K9_BK 4
 
-/** SECTION: DEBUGGING **/
-#define DEBUG 0
-#if DEBUG == 1
-double dbg_start_time, dbg_ce_init, dbg_ce_final;
-#define DEBUG_PRINT(...) do { \
-  printf(__VA_ARGS__); \
-} while (0)
-#else
-#define DEBUG_PRINT(...)
-#endif
-
-/** SECTION: Kernels **/
+/** KERNELS **/
 /* Embedding CUDA kernel */
 __global__ void kembedding(const int *in, const float *w, float *out, size_t s, size_t H) {
 
@@ -384,62 +377,81 @@ __global__ void kgetmax(const float *in, float *out, size_t s, size_t C) {
 __global__ void kconcat(const float *in1, const float *in2, const float *in3, const float *in4, 
                               float *out, size_t N1, size_t N2, size_t N3, size_t N4) {
   
-  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  size_t i = blockIdx.x * blockDim.x + threadIdx.x;
 
-  if (idx < N1) {
-    out[idx] = in1[idx];
-  } else if (idx < N1 + N2) {
-    out[idx] = in2[idx - N1];
-  } else if (idx < N1 + N2 + N3) {
-    out[idx] = in3[idx - N1 - N2];
-  } else if (idx < N1 + N2 + N3 + N4) {
-    out[idx] = in4[idx - N1 - N2 - N3];
+  if (i < N1) {
+    out[i] = in1[i];
+  } else if (i < N1 + N2) {
+    out[i] = in2[i - N1];
+  } else if (i < N1 + N2 + N3) {
+    out[i] = in3[i - N1 - N2];
+  } else if (i < N1 + N2 + N3 + N4) {
+    out[i] = in4[i - N1 - N2 - N3];
   }
 }
 
 /* Linear CUDA kernel */
 __global__ void klinear(float *in, float *w, float *b, float *out, int N, int M, bool relu) {
-  const int TILESIZE = LINEAR_BM;
-  __shared__ float t_in[TILESIZE];
-  __shared__ float t_w[TILESIZE][TILESIZE + 8];
+  int i = threadIdx.x + blockIdx.x * blockDim.x;
 
-  int i = threadIdx.x;
-  int row = blockIdx.x * TILESIZE + i;
-
-  float val = 0.0f;
-  int ntiles = (N + TILESIZE - 1) / TILESIZE;
-
-  for (int t = 0; t < ntiles; t++) {
-    // Load input
-    if (t * TILESIZE + i < N) {
-      t_in[i] = in[t * TILESIZE + i];
-    } else {
-      t_in[i] = 0.0f;
+  if (i < M) {
+    float val = 0.f;
+    for (int j = 0; j < N; j++) {
+        val += in[j] * w[i * N + j];
     }
-    // Load weight
-    for (int j = 0; j < TILESIZE; j++) {
-      int col = t * TILESIZE + j;
-      if (row < M && col < N) {
-        t_w[j][i] = w[row * N + col];
-      } else {
-        t_w[j][i] = 0.0f;
-      }
-    }
-    __syncthreads();
 
-    // Compute
-    for (int j = 0; j < TILESIZE; j++) {
-      val += t_in[j] * t_w[j][i];
+    val += b[i];
+    if (relu) {
+        val = fmaxf(val, 0.0f);
     }
-    __syncthreads();
-  }
-
-  // Store the result
-  if (row < M) {
-    out[row] = val + b[row];
-    if (relu) out[row] = fmaxf(out[row], 0.0f);
+    out[i] = val;
   }
 }
+
+__global__ void klinear_relu(float *in, float *w, float *b, float *out, int N, int M, bool relu) {
+/** CONSTS **/
+  const int BN = LIN_REG_BN;
+  const int BK = LIN_REG_BK;
+  const int LDPT_INPUT = BK / BN;
+  const int LDPT_WEIGHT = BK;
+
+  /** VARS **/
+  float val = 0.0f;
+
+  int oblock_n = blockIdx.x * BN;
+
+  /** SMEM **/
+  __shared__ float input_buf[BK+4];
+  __shared__ float weight_buf[BN][BK+4];
+
+  /** LOOP OVER K **/
+  for (int bk = 0; bk < N; bk += BK) {
+    // load input
+    for (int ld_input = 0; ld_input < LDPT_INPUT; ld_input++) {
+      input_buf[threadIdx.x * LDPT_INPUT + ld_input] = in[bk + threadIdx.x * LDPT_INPUT + ld_input];
+    }
+
+    // load weight
+    for (int ld_weight = 0; ld_weight < LDPT_WEIGHT; ld_weight++) {
+      weight_buf[threadIdx.x][ld_weight] = w[ N * (oblock_n + threadIdx.x) + bk + ld_weight];
+    }
+
+    __syncthreads();
+
+    // compute
+    for (int k = 0; k < BK; k++) {
+      val += weight_buf[threadIdx.x][k] * input_buf[k];
+    }
+
+    __syncthreads();
+  }
+
+  /** STORE **/
+  val += b[oblock_n + threadIdx.x];
+  if (relu && val < 0.0f) val = 0.0f;
+  out[oblock_n + threadIdx.x] = val;
+}
+
 
 /* Embedding
  * @param [in1]  in: [s]
@@ -555,14 +567,14 @@ void Concat(float *in1, float *in2, float *in3, float *in4,
  * 'M' is the output feature size
  */
 void Linear_ReLU(float *in, float *w, float *b, float *out, int N, int M, cudaStream_t stream) {
-    int blockDim(LINEAR_BM);
+    int blockDim(LIN_REG_BN);
     int gridDim(div(M, blockDim));
-    klinear<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, N, M, true);
+    klinear_relu<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, N, M, true);
 }
 
 // Final result
 void Linear(float *in, float *w, float *b, float *out, int N, int M, cudaStream_t stream) {
-    int blockDim(LINEAR_BM);
+    int blockDim(LIN_NAIVE_BN);
     int gridDim(div(M, blockDim));
     klinear<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, N, M, false);
 }
