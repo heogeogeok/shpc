@@ -273,6 +273,7 @@ void predict_sentiment(int *inputs, float *outputs, size_t n_samples) {
 
   size_t inputs_size = MAX_SAMPLES * SEQ_LEN * sizeof(int);
   size_t outputs_size = MAX_SAMPLES * 2 * sizeof(float);
+
   if (mpi_rank != 0)
   {
     inputs = (int *) malloc(inputs_size);
@@ -346,7 +347,6 @@ void predict_sentiment(int *inputs, float *outputs, size_t n_samples) {
       // Copy the computation result to the outputs
       CHECK_CUDA(cudaMemcpyAsync(outputs + n * N_CLASSES, linear3_a_d[gpu_idx], 
                             N_CLASSES * sizeof(float), cudaMemcpyDeviceToHost, _gpu_stream_d2h[gpu_idx]));
-
     }
   }
   for (int i = 0; i < NGPU; ++i) {

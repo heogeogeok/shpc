@@ -5,12 +5,11 @@
 -   [x] Calculate each operator with CUDA: `Embedding`, `Conv1D`, `Permute`, `ReLU`, `GetMax`, `Linear`, etc.
 
     -   [x] Create CUDA version of each operators
-        -   `Conv1D`: Naive
+        -   `Conv1D`: Tiling
         -   `Permute`: Naive
         -   `ReLU`: All merged into the other operators
         -   `GetMax`: Naive
         -   `Linear`: Naive
-    -   [ ] Store most of intermediate features in global memory
 
 -   [x] Create weakly fused operators: `Conv1D_ReLU`, `Linear_ReLU`, etc.
 
@@ -29,5 +28,6 @@
 -   GPU computation: 95 (sentences/sec)
 -   Multi-GPU: 260 (sentences/sec)
 -   Stream: 272 (sentences/sec)
--   Linear kernel code: 303.073489 (sentences/sec)
--   Synchronously offload input to other nodes using MPI 1100.580692 (sentences/sec)
+-   Linear kernel code: 303.07 (sentences/sec)
+-   MPI offload: 1100.58 (sentences/sec)
+-   Convolution kernel code: 2826.95 (sentences/sec)
