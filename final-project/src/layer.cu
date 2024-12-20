@@ -3,9 +3,9 @@
 #define div(x, y) (((x) + (y) -1) / (y))
 
 /** BLOCK SIZE **/
-#define LIN_NAIVE_BN 4
+#define LIN_NAIVE_BM 4
 
-#define LIN_REG_BN 16
+#define LIN_REG_BM 16
 #define LIN_REG_BK 32
 
 #define C1D_K3_BM 16
@@ -16,9 +16,9 @@
 #define C1D_K5_BN 8
 #define C1D_K5_BK 8
 
-#define C1D_K7_BM 16
-#define C1D_K7_BN 8
-#define C1D_K7_BK 8
+#define C1D_K7_BM 8
+#define C1D_K7_BN 32
+#define C1D_K7_BK 4
 
 #define C1D_K9_BM 8
 #define C1D_K9_BN 32
@@ -195,7 +195,7 @@ __global__ void k5conv1d(float *in, float *w, float *b, float *out,
     __syncthreads();
   }
 
-  // store
+  // Store
   if(othread_valid){
     val += b[oblock_m_offset + othread_m_offset];
     out[(oblock_m_offset + othread_m_offset) * os + oblock_n_offset + othread_n_offset] = val > 0.0f ? val : 0.0f;
@@ -260,7 +260,7 @@ __global__ void k7conv1d(float *in, float *w, float *b, float *out,
 
     __syncthreads();
 
-    // compute
+    // Compute
     if (othread_valid) {
       for (int k = 0; k < BK; k++) {
         for (int i = 0; i < KERNEL_SIZE; i++) {
@@ -410,46 +410,43 @@ __global__ void klinear(float *in, float *w, float *b, float *out, int N, int M,
 
 __global__ void klinear_relu(float *in, float *w, float *b, float *out, int N, int M, bool relu) {
 /** CONSTS **/
-  const int BN = LIN_REG_BN;
+  const int BM = LIN_REG_BM;
   const int BK = LIN_REG_BK;
-  const int LDPT_INPUT = BK / BN;
+  const int LDPT_INPUT = BK / BM;
   const int LDPT_WEIGHT = BK;
 
-  /** VARS **/
   float val = 0.0f;
 
-  int oblock_n = blockIdx.x * BN;
+  int oblock_m = blockIdx.x * BM;
 
-  /** SMEM **/
-  __shared__ float input_buf[BK+4];
-  __shared__ float weight_buf[BN][BK+4];
+  __shared__ float t_in[BK + 4];
+  __shared__ float t_w[BM][BK + 4];
 
-  /** LOOP OVER K **/
   for (int bk = 0; bk < N; bk += BK) {
-    // load input
+    // Load input
     for (int ld_input = 0; ld_input < LDPT_INPUT; ld_input++) {
-      input_buf[threadIdx.x * LDPT_INPUT + ld_input] = in[bk + threadIdx.x * LDPT_INPUT + ld_input];
+      t_in[threadIdx.x * LDPT_INPUT + ld_input] = in[bk + threadIdx.x * LDPT_INPUT + ld_input];
     }
 
-    // load weight
+    // Load weight
     for (int ld_weight = 0; ld_weight < LDPT_WEIGHT; ld_weight++) {
-      weight_buf[threadIdx.x][ld_weight] = w[ N * (oblock_n + threadIdx.x) + bk + ld_weight];
+      t_w[threadIdx.x][ld_weight] = w[N * (oblock_m + threadIdx.x) + bk + ld_weight];
     }
 
     __syncthreads();
 
-    // compute
+    // Compute
     for (int k = 0; k < BK; k++) {
-      val += weight_buf[threadIdx.x][k] * input_buf[k];
+      val += t_w[threadIdx.x][k] * t_in[k];
     }
 
     __syncthreads();
   }
 
-  /** STORE **/
-  val += b[oblock_n + threadIdx.x];
+  // Store
+  val += b[oblock_m + threadIdx.x];
   if (relu && val < 0.0f) val = 0.0f;
-  out[oblock_n + threadIdx.x] = val;
+  out[oblock_m + threadIdx.x] = val;
 }
 
 
@@ -567,14 +564,14 @@ void Concat(float *in1, float *in2, float *in3, float *in4,
  * 'M' is the output feature size
  */
 void Linear_ReLU(float *in, float *w, float *b, float *out, int N, int M, cudaStream_t stream) {
-    int blockDim(LIN_REG_BN);
+    int blockDim(LIN_REG_BM);
     int gridDim(div(M, blockDim));
     klinear_relu<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, N, M, true);
 }
 
 // Final result
 void Linear(float *in, float *w, float *b, float *out, int N, int M, cudaStream_t stream) {
-    int blockDim(LIN_NAIVE_BN);
+    int blockDim(LIN_NAIVE_BM);
     int gridDim(div(M, blockDim));
     klinear<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, N, M, false);
 }

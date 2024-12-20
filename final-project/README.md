@@ -33,3 +33,4 @@
 -   Convolution kernel code: 2826.95 (sentences/sec)
 -   Hyperparemeter: 3545.14 (sentences/sec)
 -   Linear kernel code: 3584.62 (sentences/sec)
+-   Hyperparemeter: 3596.31 (sentences/sec)
