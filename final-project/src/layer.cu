@@ -16,9 +16,9 @@
 #define C1D_K7_BN 8
 #define C1D_K7_BK 8
 
-#define C1D_K9_BM 16
-#define C1D_K9_BN 8
-#define C1D_K9_BK 8
+#define C1D_K9_BM 8
+#define C1D_K9_BN 32
+#define C1D_K9_BK 4
 
 /** SECTION: DEBUGGING **/
 #define DEBUG 0
@@ -81,7 +81,7 @@ __global__ void k3conv1d(float *in, float *w, float *b, float *out,
 
   for(int bk = 0; bk < C; bk += BK)
   {
-    // load input
+    // Load input
     int iblock_k_offset = bk;
     int iblock_n_offset = oblock_n_offset;
     int len_iblock_k = min(BK, C - iblock_k_offset);
@@ -95,7 +95,7 @@ __global__ void k3conv1d(float *in, float *w, float *b, float *out,
       t_in[ithread_k_offset][ithread_n_offset] = in[(iblock_k_offset + ithread_k_offset) * s + iblock_n_offset + ithread_n_offset];
     }
 
-    // load weight
+    // Load weight
     int wblock_m_offset = oblock_m_offset;
     int wblock_k_offset = bk;
     int len_wblock_m = min(BM, OC - wblock_m_offset);
@@ -113,7 +113,7 @@ __global__ void k3conv1d(float *in, float *w, float *b, float *out,
 
     __syncthreads();
 
-    // compute
+    // Compute
     if (othread_valid) {
       for (int k = 0; k < BK; k++) {
         for (int i = 0; i < KERNEL_SIZE; i++) {
@@ -125,7 +125,7 @@ __global__ void k3conv1d(float *in, float *w, float *b, float *out,
     __syncthreads();
   }
 
-  // store
+  // Store
   if(othread_valid){
     val += b[oblock_m_offset + othread_m_offset];
     out[(oblock_m_offset + othread_m_offset) * os + oblock_n_offset + othread_n_offset] = val > 0.0f ? val : 0.0f;
@@ -134,7 +134,7 @@ __global__ void k3conv1d(float *in, float *w, float *b, float *out,
 
 __global__ void k5conv1d(float *in, float *w, float *b, float *out, 
                               int C, int K, int s, int OC, int os){
- const int BK = C1D_K5_BK;
+  const int BK = C1D_K5_BK;
   const int BN = C1D_K5_BN;
   const int BM = C1D_K5_BM;
   const int KERNEL_SIZE = 5;
@@ -158,7 +158,7 @@ __global__ void k5conv1d(float *in, float *w, float *b, float *out,
 
   for(int bk = 0; bk < C; bk += BK)
   {
-    // load input
+    // Load input
     int iblock_k_offset = bk;
     int iblock_n_offset = oblock_n_offset;
     int len_iblock_k = min(BK, C - iblock_k_offset);
@@ -172,7 +172,7 @@ __global__ void k5conv1d(float *in, float *w, float *b, float *out,
       t_in[ithread_k_offset][ithread_n_offset] = in[(iblock_k_offset + ithread_k_offset) * s + iblock_n_offset + ithread_n_offset];
     }
 
-    // load weight
+    // Load weight
     int wblock_m_offset = oblock_m_offset;
     int wblock_k_offset = bk;
     int len_wblock_m = min(BM, OC - wblock_m_offset);
@@ -190,7 +190,7 @@ __global__ void k5conv1d(float *in, float *w, float *b, float *out,
 
     __syncthreads();
 
-    // compute
+    // Compute
     if (othread_valid) {
       for (int k = 0; k < BK; k++) {
         for (int i = 0; i < KERNEL_SIZE; i++) {
@@ -211,7 +211,7 @@ __global__ void k5conv1d(float *in, float *w, float *b, float *out,
 
 __global__ void k7conv1d(float *in, float *w, float *b, float *out, 
                               int C, int K, int s, int OC, int os){
- const int BK = C1D_K7_BK;
+  const int BK = C1D_K7_BK;
   const int BN = C1D_K7_BN;
   const int BM = C1D_K7_BM;
   const int KERNEL_SIZE = 7;
@@ -221,7 +221,7 @@ __global__ void k7conv1d(float *in, float *w, float *b, float *out,
 
   float val = 0.0f;
 
-  // output blocks
+  // Output blocks
   int oblock_m_offset = blockIdx.x * BM;
   int oblock_n_offset = blockIdx.y * BN;
 
@@ -235,7 +235,7 @@ __global__ void k7conv1d(float *in, float *w, float *b, float *out,
 
   for(int bk = 0; bk < C; bk += BK)
   {
-    // load input
+    // Load input
     int iblock_k_offset = bk;
     int iblock_n_offset = oblock_n_offset;
     int len_iblock_k = min(BK, C - iblock_k_offset);
@@ -249,7 +249,7 @@ __global__ void k7conv1d(float *in, float *w, float *b, float *out,
       t_in[ithread_k_offset][ithread_n_offset] = in[(iblock_k_offset + ithread_k_offset) * s + iblock_n_offset + ithread_n_offset];
     }
 
-    // load weight
+    // Load weight
     int wblock_m_offset = oblock_m_offset;
     int wblock_k_offset = bk;
     int len_wblock_m = min(BM, OC - wblock_m_offset);
@@ -312,7 +312,7 @@ __global__ void k9conv1d(float *in, float *w, float *b, float *out,
 
   for(int bk = 0; bk < C; bk += BK)
   {
-    // load input
+    // Load input
     int iblock_k_offset = bk;
     int iblock_n_offset = oblock_n_offset;
     int len_iblock_k = min(BK, C - iblock_k_offset);
@@ -326,7 +326,7 @@ __global__ void k9conv1d(float *in, float *w, float *b, float *out,
       t_in[ithread_k_offset][ithread_n_offset] = in[(iblock_k_offset + ithread_k_offset) * s + iblock_n_offset + ithread_n_offset];
     }
 
-    // load weight
+    // Load weight
     int wblock_m_offset = oblock_m_offset;
     int wblock_k_offset = bk;
     int len_wblock_m = min(BM, OC - wblock_m_offset);
@@ -344,7 +344,7 @@ __global__ void k9conv1d(float *in, float *w, float *b, float *out,
 
     __syncthreads();
 
-    // compute
+    // Compute
     if (othread_valid) {
       for (int k = 0; k < BK; k++) {
         for (int i = 0; i < KERNEL_SIZE; i++) {

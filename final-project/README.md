@@ -31,3 +31,4 @@
 -   Linear kernel code: 303.07 (sentences/sec)
 -   MPI offload: 1100.58 (sentences/sec)
 -   Convolution kernel code: 2826.95 (sentences/sec)
+-   Hyperparemeter: 3545.14 (sentences/sec)
