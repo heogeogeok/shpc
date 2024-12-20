@@ -1,23 +1,23 @@
 #include "layer.h"
 
-#define div(x, y) (((x) + (y) - 1) / (y))
+#define ceil_div(x, y) (((x) + (y) - 1) / (y))
 
 /** BLOCK SIZE **/
-#define CONV1D_K3_BM 16
-#define CONV1D_K3_BK 8
-#define CONV1D_K3_BN 8
+#define CONV1D_K3_OC 16
+#define CONV1D_K3_C 8
+#define CONV1D_K3_OS 8
 
-#define CONV1D_K5_BM 8
-#define CONV1D_K5_BK 4
-#define CONV1D_K5_BN 32
+#define CONV1D_K5_OC 8
+#define CONV1D_K5_C 4
+#define CONV1D_K5_OS 32
 
-#define CONV1D_K7_BM 8
-#define CONV1D_K7_BK 4
-#define CONV1D_K7_BN 32
+#define CONV1D_K7_OC 8
+#define CONV1D_K7_C 4
+#define CONV1D_K7_OS 32
 
-#define CONV1D_K9_BM 8
-#define CONV1D_K9_BK 4
-#define CONV1D_K9_BN 32
+#define CONV1D_K9_OC 8
+#define CONV1D_K9_C 4
+#define CONV1D_K9_OS 32
 
 #define LINEAR_BM 4
 
@@ -50,41 +50,43 @@ __global__ void kpermute(const float *in, float *out, size_t s, size_t H) {
 /* Conv1D CUDA kernel */
 __global__ void k3conv1d(float *in, float *w, float *b, float *out, 
                               int C, int K, int s, int OC, int os){
-  const int BK = CONV1D_K3_BK;
-  const int BN = CONV1D_K3_BN;
-  const int BM = CONV1D_K3_BM;
+  const int BLOCK_OC = CONV1D_K3_OC;
+  const int BLOCK_C = CONV1D_K3_C;
+  const int BLOCK_OS = CONV1D_K3_OS;
+  
   const int KERNEL_SIZE = 3;
 
-  __shared__ float t_in[BK][BN + KERNEL_SIZE - 1 + 4];
-  __shared__ float t_w[BM][BK][KERNEL_SIZE + 4];
+  __shared__ float t_in[BLOCK_C][BLOCK_OS + KERNEL_SIZE - 1 + 4];
+  __shared__ float t_w[BLOCK_OC][BLOCK_C][KERNEL_SIZE + 4];
 
   float val = 0.0f;
 
-  int out_m = blockIdx.x * BM;
-  int out_n = blockIdx.y * BN;
+  int out_m = blockIdx.x * BLOCK_OC;
+  int out_n = blockIdx.y * BLOCK_OS;
 
-  int out_tm = threadIdx.x / min(BN, os - out_n);
-  int out_tn = threadIdx.x % min(BN, os - out_n);
+  int out_tm = threadIdx.x / min(BLOCK_OS, os - out_n);
+  int out_tn = threadIdx.x % min(BLOCK_OS, os - out_n);
 
-  for(int bk = 0; bk < C; bk += BK)
+  for(int bk = 0; bk < C; bk += BLOCK_C)
   {
     // Load input
     int in_k = bk;
     int in_n = out_n;
-    int in_tk = threadIdx.x / min(BN + KERNEL_SIZE - 1, s - in_n);
-    int in_tn = threadIdx.x % min(BN + KERNEL_SIZE - 1, s - in_n);
 
-    if (in_tk < min(BK, C - in_k)){
+    int in_tk = threadIdx.x / min(BLOCK_OS + KERNEL_SIZE - 1, s - in_n);
+    int in_tn = threadIdx.x % min(BLOCK_OS + KERNEL_SIZE - 1, s - in_n);
+
+    if (in_tk < min(BLOCK_C, C - in_k)){
       t_in[in_tk][in_tn] = in[(in_k + in_tk) * s + in_n + in_tn];
     }
     // Load weight
     int w_m = out_m;
     int w_k = bk;
 
-    int w_tm = threadIdx.x / min(BK, C - w_k);
-    int w_tk = threadIdx.x % min(BK, C - w_k);
+    int w_tm = threadIdx.x / min(BLOCK_C, C - w_k);
+    int w_tk = threadIdx.x % min(BLOCK_C, C - w_k);
 
-    if(w_tm < min(BM, OC - w_m)) {
+    if(w_tm < min(BLOCK_OC, OC - w_m)) {
       for (int i = 0; i < KERNEL_SIZE; i++) {
         t_w[w_tm][w_tk][i] = w[(w_m + w_tm) * C * K + (w_k + w_tk) * K + i];
       }
@@ -93,19 +95,18 @@ __global__ void k3conv1d(float *in, float *w, float *b, float *out,
     __syncthreads();
 
     // Compute
-    if (out_tm < min(BM, OC - out_m)) {
-      for (int k = 0; k < BK; k++) {
+    if (out_tm < min(BLOCK_OC, OC - out_m)) {
+      for (int k = 0; k < BLOCK_C; k++) {
         for (int i = 0; i < KERNEL_SIZE; i++) {
           val += t_w[out_tm][k][i] *  t_in[k][out_tn + i];
         }  
       }
     }
-    
     __syncthreads();
   }
 
   // Store
-  if(out_tm < min(BM, OC - out_m)){
+  if(out_tm < min(BLOCK_OC, OC - out_m)){
     val += b[out_m + out_tm];
     out[(out_m + out_tm) * os + out_n + out_tn] = val > 0.0f ? val : 0.0f;
   }
@@ -113,41 +114,43 @@ __global__ void k3conv1d(float *in, float *w, float *b, float *out,
 
 __global__ void k5conv1d(float *in, float *w, float *b, float *out, 
                               int C, int K, int s, int OC, int os){
-  const int BK = CONV1D_K5_BK;
-  const int BN = CONV1D_K5_BN;
-  const int BM = CONV1D_K5_BM;
+  const int BLOCK_OC = CONV1D_K5_OC;
+  const int BLOCK_C = CONV1D_K5_C;
+  const int BLOCK_OS = CONV1D_K5_OS;
+  
   const int KERNEL_SIZE = 5;
 
-  __shared__ float t_in[BK][BN + KERNEL_SIZE - 1 + 4];
-  __shared__ float t_w[BM][BK][KERNEL_SIZE + 4];
+  __shared__ float t_in[BLOCK_C][BLOCK_OS + KERNEL_SIZE - 1 + 4];
+  __shared__ float t_w[BLOCK_OC][BLOCK_C][KERNEL_SIZE + 4];
 
   float val = 0.0f;
 
-  int out_m = blockIdx.x * BM;
-  int out_n = blockIdx.y * BN;
+  int out_m = blockIdx.x * BLOCK_OC;
+  int out_n = blockIdx.y * BLOCK_OS;
 
-  int out_tm = threadIdx.x / min(BN, os - out_n);
-  int out_tn = threadIdx.x % min(BN, os - out_n);
+  int out_tm = threadIdx.x / min(BLOCK_OS, os - out_n);
+  int out_tn = threadIdx.x % min(BLOCK_OS, os - out_n);
 
-  for(int bk = 0; bk < C; bk += BK)
+  for(int bk = 0; bk < C; bk += BLOCK_C)
   {
     // Load input
     int in_k = bk;
     int in_n = out_n;
-    int in_tk = threadIdx.x / min(BN + KERNEL_SIZE - 1, s - in_n);
-    int in_tn = threadIdx.x % min(BN + KERNEL_SIZE - 1, s - in_n);
 
-    if (in_tk < min(BK, C - in_k)){
+    int in_tk = threadIdx.x / min(BLOCK_OS + KERNEL_SIZE - 1, s - in_n);
+    int in_tn = threadIdx.x % min(BLOCK_OS + KERNEL_SIZE - 1, s - in_n);
+
+    if (in_tk < min(BLOCK_C, C - in_k)){
       t_in[in_tk][in_tn] = in[(in_k + in_tk) * s + in_n + in_tn];
     }
     // Load weight
     int w_m = out_m;
     int w_k = bk;
 
-    int w_tm = threadIdx.x / min(BK, C - w_k);
-    int w_tk = threadIdx.x % min(BK, C - w_k);
+    int w_tm = threadIdx.x / min(BLOCK_C, C - w_k);
+    int w_tk = threadIdx.x % min(BLOCK_C, C - w_k);
 
-    if(w_tm < min(BM, OC - w_m)) {
+    if(w_tm < min(BLOCK_OC, OC - w_m)) {
       for (int i = 0; i < KERNEL_SIZE; i++) {
         t_w[w_tm][w_tk][i] = w[(w_m + w_tm) * C * K + (w_k + w_tk) * K + i];
       }
@@ -156,19 +159,18 @@ __global__ void k5conv1d(float *in, float *w, float *b, float *out,
     __syncthreads();
 
     // Compute
-    if (out_tm < min(BM, OC - out_m)) {
-      for (int k = 0; k < BK; k++) {
+    if (out_tm < min(BLOCK_OC, OC - out_m)) {
+      for (int k = 0; k < BLOCK_C; k++) {
         for (int i = 0; i < KERNEL_SIZE; i++) {
           val += t_w[out_tm][k][i] *  t_in[k][out_tn + i];
         }  
       }
     }
-    
     __syncthreads();
   }
 
   // Store
-  if(out_tm < min(BM, OC - out_m)){
+  if(out_tm < min(BLOCK_OC, OC - out_m)){
     val += b[out_m + out_tm];
     out[(out_m + out_tm) * os + out_n + out_tn] = val > 0.0f ? val : 0.0f;
   }
@@ -176,41 +178,43 @@ __global__ void k5conv1d(float *in, float *w, float *b, float *out,
 
 __global__ void k7conv1d(float *in, float *w, float *b, float *out, 
                               int C, int K, int s, int OC, int os){
-  const int BK = CONV1D_K7_BK;
-  const int BN = CONV1D_K7_BN;
-  const int BM = CONV1D_K7_BM;
+  const int BLOCK_OC = CONV1D_K7_OC;
+  const int BLOCK_C = CONV1D_K7_C;
+  const int BLOCK_OS = CONV1D_K7_OS;
+  
   const int KERNEL_SIZE = 7;
 
-  __shared__ float t_in[BK][BN + KERNEL_SIZE - 1 + 4];
-  __shared__ float t_w[BM][BK][KERNEL_SIZE + 4];
+  __shared__ float t_in[BLOCK_C][BLOCK_OS + KERNEL_SIZE - 1 + 4];
+  __shared__ float t_w[BLOCK_OC][BLOCK_C][KERNEL_SIZE + 4];
 
   float val = 0.0f;
 
-  int out_m = blockIdx.x * BM;
-  int out_n = blockIdx.y * BN;
+  int out_m = blockIdx.x * BLOCK_OC;
+  int out_n = blockIdx.y * BLOCK_OS;
 
-  int out_tm = threadIdx.x / min(BN, os - out_n);
-  int out_tn = threadIdx.x % min(BN, os - out_n);
+  int out_tm = threadIdx.x / min(BLOCK_OS, os - out_n);
+  int out_tn = threadIdx.x % min(BLOCK_OS, os - out_n);
 
-  for(int bk = 0; bk < C; bk += BK)
+  for(int bk = 0; bk < C; bk += BLOCK_C)
   {
     // Load input
     int in_k = bk;
     int in_n = out_n;
-    int in_tk = threadIdx.x / min(BN + KERNEL_SIZE - 1, s - in_n);
-    int in_tn = threadIdx.x % min(BN + KERNEL_SIZE - 1, s - in_n);
 
-    if (in_tk < min(BK, C - in_k)){
+    int in_tk = threadIdx.x / min(BLOCK_OS + KERNEL_SIZE - 1, s - in_n);
+    int in_tn = threadIdx.x % min(BLOCK_OS + KERNEL_SIZE - 1, s - in_n);
+
+    if (in_tk < min(BLOCK_C, C - in_k)){
       t_in[in_tk][in_tn] = in[(in_k + in_tk) * s + in_n + in_tn];
     }
     // Load weight
     int w_m = out_m;
     int w_k = bk;
 
-    int w_tm = threadIdx.x / min(BK, C - w_k);
-    int w_tk = threadIdx.x % min(BK, C - w_k);
+    int w_tm = threadIdx.x / min(BLOCK_C, C - w_k);
+    int w_tk = threadIdx.x % min(BLOCK_C, C - w_k);
 
-    if(w_tm < min(BM, OC - w_m)) {
+    if(w_tm < min(BLOCK_OC, OC - w_m)) {
       for (int i = 0; i < KERNEL_SIZE; i++) {
         t_w[w_tm][w_tk][i] = w[(w_m + w_tm) * C * K + (w_k + w_tk) * K + i];
       }
@@ -219,19 +223,18 @@ __global__ void k7conv1d(float *in, float *w, float *b, float *out,
     __syncthreads();
 
     // Compute
-    if (out_tm < min(BM, OC - out_m)) {
-      for (int k = 0; k < BK; k++) {
+    if (out_tm < min(BLOCK_OC, OC - out_m)) {
+      for (int k = 0; k < BLOCK_C; k++) {
         for (int i = 0; i < KERNEL_SIZE; i++) {
           val += t_w[out_tm][k][i] *  t_in[k][out_tn + i];
         }  
       }
     }
-    
     __syncthreads();
   }
 
   // Store
-  if(out_tm < min(BM, OC - out_m)){
+  if(out_tm < min(BLOCK_OC, OC - out_m)){
     val += b[out_m + out_tm];
     out[(out_m + out_tm) * os + out_n + out_tn] = val > 0.0f ? val : 0.0f;
   }
@@ -239,41 +242,43 @@ __global__ void k7conv1d(float *in, float *w, float *b, float *out,
 
 __global__ void k9conv1d(float *in, float *w, float *b, float *out, 
                               int C, int K, int s, int OC, int os){
-  const int BK = CONV1D_K9_BK;
-  const int BN = CONV1D_K9_BN;
-  const int BM = CONV1D_K9_BM;
+  const int BLOCK_OC = CONV1D_K9_OC;
+  const int BLOCK_C = CONV1D_K9_C;
+  const int BLOCK_OS = CONV1D_K9_OS;
+  
   const int KERNEL_SIZE = 9;
 
-  __shared__ float t_in[BK][BN + KERNEL_SIZE - 1 + 4];
-  __shared__ float t_w[BM][BK][KERNEL_SIZE + 4];
+  __shared__ float t_in[BLOCK_C][BLOCK_OS + KERNEL_SIZE - 1 + 4];
+  __shared__ float t_w[BLOCK_OC][BLOCK_C][KERNEL_SIZE + 4];
 
   float val = 0.0f;
 
-  int out_m = blockIdx.x * BM;
-  int out_n = blockIdx.y * BN;
+  int out_m = blockIdx.x * BLOCK_OC;
+  int out_n = blockIdx.y * BLOCK_OS;
 
-  int out_tm = threadIdx.x / min(BN, os - out_n);
-  int out_tn = threadIdx.x % min(BN, os - out_n);
+  int out_tm = threadIdx.x / min(BLOCK_OS, os - out_n);
+  int out_tn = threadIdx.x % min(BLOCK_OS, os - out_n);
 
-  for(int bk = 0; bk < C; bk += BK)
+  for(int bk = 0; bk < C; bk += BLOCK_C)
   {
     // Load input
     int in_k = bk;
     int in_n = out_n;
-    int in_tk = threadIdx.x / min(BN + KERNEL_SIZE - 1, s - in_n);
-    int in_tn = threadIdx.x % min(BN + KERNEL_SIZE - 1, s - in_n);
 
-    if (in_tk < min(BK, C - in_k)){
+    int in_tk = threadIdx.x / min(BLOCK_OS + KERNEL_SIZE - 1, s - in_n);
+    int in_tn = threadIdx.x % min(BLOCK_OS + KERNEL_SIZE - 1, s - in_n);
+
+    if (in_tk < min(BLOCK_C, C - in_k)){
       t_in[in_tk][in_tn] = in[(in_k + in_tk) * s + in_n + in_tn];
     }
     // Load weight
     int w_m = out_m;
     int w_k = bk;
 
-    int w_tm = threadIdx.x / min(BK, C - w_k);
-    int w_tk = threadIdx.x % min(BK, C - w_k);
+    int w_tm = threadIdx.x / min(BLOCK_C, C - w_k);
+    int w_tk = threadIdx.x % min(BLOCK_C, C - w_k);
 
-    if(w_tm < min(BM, OC - w_m)) {
+    if(w_tm < min(BLOCK_OC, OC - w_m)) {
       for (int i = 0; i < KERNEL_SIZE; i++) {
         t_w[w_tm][w_tk][i] = w[(w_m + w_tm) * C * K + (w_k + w_tk) * K + i];
       }
@@ -282,19 +287,18 @@ __global__ void k9conv1d(float *in, float *w, float *b, float *out,
     __syncthreads();
 
     // Compute
-    if (out_tm < min(BM, OC - out_m)) {
-      for (int k = 0; k < BK; k++) {
+    if (out_tm < min(BLOCK_OC, OC - out_m)) {
+      for (int k = 0; k < BLOCK_C; k++) {
         for (int i = 0; i < KERNEL_SIZE; i++) {
           val += t_w[out_tm][k][i] *  t_in[k][out_tn + i];
         }  
       }
     }
-    
     __syncthreads();
   }
 
   // Store
-  if(out_tm < min(BM, OC - out_m)){
+  if(out_tm < min(BLOCK_OC, OC - out_m)){
     val += b[out_m + out_tm];
     out[(out_m + out_tm) * os + out_n + out_tn] = val > 0.0f ? val : 0.0f;
   }
@@ -303,7 +307,6 @@ __global__ void k9conv1d(float *in, float *w, float *b, float *out,
 
 /* GetMax CUDA kernel */
 __global__ void kgetmax(const float *in, float *out, size_t s, size_t C) {
-  
   int i = blockIdx.x * blockDim.x + threadIdx.x;  
 
   if (i < C) {  
@@ -397,7 +400,7 @@ __global__ void klinear_relu(float *in, float *w, float *b, float *out, int N, i
 
 void Embedding(int *in, float* w, float *out, size_t s, size_t H) {
   dim3 blockDim(8, 16);
-  dim3 gridDim(div(H, blockDim.x), div(s, blockDim.y));
+  dim3 gridDim(ceil_div(H, blockDim.x), ceil_div(s, blockDim.y));
   kembedding<<<gridDim, blockDim>>>(in, w, out, s, H);
 }
 
@@ -407,7 +410,7 @@ void Embedding(int *in, float* w, float *out, size_t s, size_t H) {
  */
 void Permute(float *in, float *out, size_t s, size_t H) {
   dim3 blockDim(32, 8);
-  dim3 gridDim(div(H, blockDim.x), div(s, blockDim.y));
+  dim3 gridDim(ceil_div(H, blockDim.x), ceil_div(s, blockDim.y));
   kpermute<<<gridDim, blockDim>>>(in, out, s, H);
 }
 
@@ -432,29 +435,29 @@ void Permute(float *in, float *out, size_t s, size_t H) {
  */
 void Conv1D_K3(float *in, float *w, float *b, float *out, size_t s, size_t C, size_t OC, size_t K, cudaStream_t stream){
   size_t os = s - K + 1;
-  dim3 blockDim(CONV1D_K3_BM * CONV1D_K3_BN);
-  dim3 gridDim(div(OC, CONV1D_K3_BM), div(os, CONV1D_K3_BN));
+  dim3 blockDim(CONV1D_K3_OC * CONV1D_K3_OS);
+  dim3 gridDim(ceil_div(OC, CONV1D_K3_OC), ceil_div(os, CONV1D_K3_OS));
   k3conv1d<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, C, K, s, OC, os);
 }
 
 void Conv1D_K5(float *in, float *w, float *b, float *out, size_t s, size_t C, size_t OC, size_t K, cudaStream_t stream){
   size_t os = s - K + 1;
-  dim3 blockDim(CONV1D_K5_BM * CONV1D_K5_BN);
-  dim3 gridDim(div(OC, CONV1D_K5_BM), div(os, CONV1D_K5_BN));
+  dim3 blockDim(CONV1D_K5_OC * CONV1D_K5_OS);
+  dim3 gridDim(ceil_div(OC, CONV1D_K5_OC), ceil_div(os, CONV1D_K5_OS));
   k5conv1d<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, C, K, s, OC, os);
 }
 
 void Conv1D_K7(float *in, float *w, float *b, float *out, size_t s, size_t C, size_t OC, size_t K, cudaStream_t stream){
   size_t os = s - K + 1;
-  dim3 blockDim(CONV1D_K7_BM * CONV1D_K7_BN);
-  dim3 gridDim(div(OC, CONV1D_K7_BM), div(os, CONV1D_K7_BN));
+  dim3 blockDim(CONV1D_K7_OC * CONV1D_K7_OS);
+  dim3 gridDim(ceil_div(OC, CONV1D_K7_OC), ceil_div(os, CONV1D_K7_OS));
   k7conv1d<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, C, K, s, OC, os);
 }
 
 void Conv1D_K9(float *in, float *w, float *b, float *out, size_t s, size_t C, size_t OC, size_t K, cudaStream_t stream){
   size_t os = s - K + 1;
-  dim3 blockDim(CONV1D_K9_BM * CONV1D_K9_BN);
-  dim3 gridDim(div(OC, CONV1D_K9_BM), div(os, CONV1D_K9_BN));
+  dim3 blockDim(CONV1D_K9_OC * CONV1D_K9_OS);
+  dim3 gridDim(ceil_div(OC, CONV1D_K9_OC), ceil_div(os, CONV1D_K9_OS));
   k9conv1d<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, C, K, s, OC, os);
 }
 
@@ -470,7 +473,7 @@ void Conv1D_K9(float *in, float *w, float *b, float *out, size_t s, size_t C, si
  */
 void GetMax(float *in, float *out, size_t C, size_t s, cudaStream_t stream){
   dim3 blockDim(256);  
-  dim3 gridDim(div(C, blockDim.x));
+  dim3 gridDim(ceil_div(C, blockDim.x));
   kgetmax<<<gridDim, blockDim, 0, stream>>>(in, out, s, C);
 }
 
@@ -485,7 +488,7 @@ void GetMax(float *in, float *out, size_t C, size_t s, cudaStream_t stream){
 void Concat(float *in1, float *in2, float *in3, float *in4, 
             float *out, size_t N1, size_t N2, size_t N3, size_t N4, cudaStream_t stream) {
   dim3 blockDim(256);
-  dim3 gridDim(div((N1 + N2 + N3 + N4), blockDim.x));
+  dim3 gridDim(ceil_div((N1 + N2 + N3 + N4), blockDim.x));
   kconcat<<<gridDim, blockDim, 0, stream>>>(in1, in2, in3, in4, out, N1, N2, N3, N4);
 }
 
@@ -499,13 +502,13 @@ void Concat(float *in1, float *in2, float *in3, float *in4,
  */
 void Linear_ReLU(float *in, float *w, float *b, float *out, int N, int M, cudaStream_t stream) {
     int blockDim(LINEAR_RELU_BM);
-    int gridDim(div(M, blockDim));
+    int gridDim(ceil_div(M, blockDim));
     klinear_relu<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, N, M, true);
 }
 
 // Final result
 void Linear(float *in, float *w, float *b, float *out, int N, int M, cudaStream_t stream) {
     int blockDim(LINEAR_BM);
-    int gridDim(div(M, blockDim));
+    int gridDim(ceil_div(M, blockDim));
     klinear<<<gridDim, blockDim, 0, stream>>>(in, w, b, out, N, M);
 }
